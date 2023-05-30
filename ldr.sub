@@ -1,0 +1,10 @@
+r ldrbios.asm
+zmac ldrbios.asm
+
+r cpmldr.asm
+rmac cpmldr.asm
+
+link loadr[L100]=cpmldr,ldrbios
+era ldr.bin
+ren ldr.bin loadr.com
+w ldr.bin b
