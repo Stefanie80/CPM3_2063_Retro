@@ -26,6 +26,8 @@ It includes a binary of the emulator, build from this repository:
 https://github.com/EtchedPixels/EmulatorKit
 
 Currently, it only runs on linux. This specific binary was compiled on Linux Mint Debian Edition.
+The file EXIT.ASM is not part of the system itself. Rather, it is a little tool for use with the mentioned emulator. 
+All it does is exit the emulator from the inside.
 
 All the manuals for CP/M 3 are available from here: http://www.s100computers.com/Software%20Folder/CPM3%20BIOS%20Installation/CPM3%20FLOPPY%20BIOS%20Software.htm
 
