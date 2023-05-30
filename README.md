@@ -25,4 +25,10 @@ https://drive.google.com/file/d/10RHLt3bqPHN4sBdgkRkXFwICIUTqFL7T/view?usp=drive
 It includes a binary of the emulator, build from this repository:
 https://github.com/EtchedPixels/EmulatorKit
 
-Currently, it only runs on linux. This specific binary was compiled on Linux Mint Debian Edition, but should work on any linux system.
+Currently, it only runs on linux. This specific binary was compiled on Linux Mint Debian Edition.
+
+All the manuals for CP/M 3 are available from here: http://www.s100computers.com/Software%20Folder/CPM3%20BIOS%20Installation/CPM3%20FLOPPY%20BIOS%20Software.htm
+
+For using the System, i reccomend reading the User Guide and keeping the Command Guide handy for reference.
+If you want to write programs to run on CP/M 3, read the Programmers Guide.
+The System Guide is meant for those who port CP/M 3 to a new system. But it is also a great source to learn about the inner workings of CP/M 3.
