@@ -9,7 +9,8 @@ debug 	equ false
 	public	?init,?ldccp,?rlccp,?time
 	extrn	?pmsg,?conin
 	extrn	@civec,@covec,@aivec,@aovec,@lovec
-	extrn 	@cbnk,?bnksl,dumpivars,spamon,spamoff,iputs,dumpregs,ictc3
+	extrn 	@cbnk,?bnksl,dumpivars,spamon,spamoff
+	extrn 	iputs,dumpregs,ictc3,usrfunc
 
 	maclib ports
 	maclib z80
@@ -31,18 +32,17 @@ if debug
 	call iputs
 	db '?INIT ',0
 endif
-	lxi h,08000h ! shld @civec ! shld @covec	; assign console to CRT:
-	lxi h,04000h ! shld @lovec 			; assign printer to LPT:
-	lxi h,02000h ! shld @aivec ! shld @aovec	; assign AUX to CRT1:
-	lxi h,init$table 
-	;call out$blocks	; set up misc hardware
+	lxi h,08000h ! shld @civec 
+	lxi h,09000h ! shld @covec	; assign console to CRT:
+	lxi h,02000h ! shld @lovec 					; assign printer to LPT:
+	lxi h,04000h ! shld @aivec ! shld @aovec	; assign AUX to CRT1:
 	lxi h,signon$msg ! call ?pmsg		; print signon message
 	ret	
 
-out$blocks:
-	mov a,m ! ora a ! rz ! mov b,a
-	inx h ! mov c,m ! inx h
-	outir
+;out$blocks:
+	;mov a,m ! ora a ! rz ! mov b,a
+	;inx h ! mov c,m ! inx h
+	;outir
 	;jmp out$blocks
 
 
@@ -68,16 +68,9 @@ endif
 	mvi a,tpa$bank ! call ?bnksl	; select TPA
 	lxi d,ccp$fcb ! call read	; load the thing
 					; now, copy CCP to bank 0 for reloading
-	lxi h,0100h ! lxi b,01000h	; clone 4K, because we can
 	lda @cbnk ! push psw		; save current bank
-ld$1:
-	mvi a,tpa$bank ! call ?bnksl	; select TPA
-	mov a,m ! push psw		; get a byte
-	mvi a,ccp$bank ! call ?bnksl		; select extra bank
-	pop psw ! mov m,a		; save the byte
-	inx h ! dcx b			; bump pointer, drop count
-	mov a,b ! ora c			; test for done
-	jnz ld$1
+	lxi b,0003h	; B=0=sys,C=3=save CCP
+	call usrfunc
 	pop psw ! call ?bnksl		; restore original bank
 	ret
 
@@ -87,15 +80,8 @@ no$CCP:			; here if we couldn't find the file
 	jmp ?ldccp			; and try again
 
 ?rlccp:
-	lxi h,0100h ! lxi b,01000h	; clone 4K
-rl$1:
-	mvi a,ccp$bank ! call ?bnksl		; select extra bank
-	mov a,m ! push psw		; get a byte
-	mvi a,tpa$bank ! call ?bnksl	; select TPA
-	pop psw ! mov m,a		; save the byte
-	inx h ! dcx b			; bump pointer, drop count
-	mov a,b ! ora c			; test for done
-	jnz rl$1
+	lxi b,0004h	; B=0=sys,C=3=save CCP
+	call usrfunc
 	ret
 
     ; No external clock.
@@ -118,7 +104,7 @@ read:
 
 opnmsg		db 	13,10,'BDOS OPEN: ',0
 
-signon$msg	db	13,10,'CP/M 3.0 for Z80 Retro!',13,10,10,0
+signon$msg	db	13,10,'CP/M 3.0 for Z80 Retro! initializing',13,10,10,0
 			
 ccp$msg		db	13,10,'BIOS Err on A: No CCP.COM file',0
 
