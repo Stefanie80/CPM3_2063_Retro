@@ -31,11 +31,14 @@ r bios3.asm
 ; compiling ZMAC sources ...
 zmac bios3.asm
 
-r sdd.asm
-zmac sdd.asm
+r sdd.z80
+zmac sdd.z80
+
+r user.z80
+zmac user.z80
 
 ; linking ...
-LINK BNKBIOS3[OS]=BIOSKRNL,SCB,BOOT,bios3,MOVE,DRVTBL,sdd,dump
+LINK BNKBIOS3[OS]=BIOSKRNL,SCB,BOOT,bios3,sdd,dump,user,MOVE,DRVTBL
 
 r bnkbdos3.spr
 r resbdos3.spr
