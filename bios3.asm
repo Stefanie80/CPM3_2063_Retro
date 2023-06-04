@@ -167,18 +167,22 @@ IVTbase				equ 0FF00h
 rtc_counter:		db 0
 rtc_limit:			db 153		; IRQ will happen at a freq of (CLK/256/256)
 								; 1 sec = 152.587890625 ticks @ 10 MHz
+
+joyport0		equ	0a8h		; I/O port for joystick 0
+joyport1		equ	0a9h		; I/O port for joystick 1
+
 					
 	public	@ctbl
 @ctbl:
 	db 	'SIO-A '	; device 0, CRT port 0
 	db	0fh
 	db 	14
-	db 	'PRN   '
-	db 	2			; 2 -> output only
-	db 	0			; 0 -> no baudrate
 	db 	'SIO-B '	; device 1, LPT port 0
 	db 	0fh
 	db 	14
+	db 	'PRN   '
+	db 	2			; 2 -> output only
+	db 	0			; 0 -> no baudrate
 if VDP
 	db 	'CRT   '
 	db 	2			; 2 -> output only
@@ -190,31 +194,81 @@ endif
 	db 	0			; table terminator
 					
 					
+extrn tickr0,tickr1
+extrn joy0,joy1
+
+public isrflags
+isrflags:
+	db 00h
 
 rtc_irq_handler:
-	ex af,af'
+	ex af,af'	;'
 	exx
 if RTC_debug > 0	
 	ld a,'.'
 	ld c,a
 	call con_tx_char
-endif	
+endif
+	; get counter and timebase
 	ld a,(rtc_limit)
 	ld b,a	
 	ld a,(rtc_counter)
+	; increase counter
 	inc a
+	; compare to time base
 	cp b
+	; count a second
 	call z,.advance_RTC
+	; store counter
 	ld (rtc_counter),a
-
+	
+	; flip LSB of time base.
 	ld a,(rtc_limit)
 	xor 01h
 	ld (rtc_limit),a
+	; use the last bit to branch into two subfunctions
+	or 01h
+	jr nz,.tick1
 	
+.tick0:
+	ld a,(isrflags)
+	and 001h
+	jr z,.nojoy0
+	; read joy0 here
+	in a,(joyport0)
+	ld (joy0),a
+.nojoy0:
+	ld a,(isrflags)
+	and 004h
+	jr z,.isr_tail
+	; call ticker0 here
+	ld hl,(tickr0)
+	call .tailcall
+	jr .isr_tail
+
+.tick1:
+	ld a,(isrflags)
+	and 002h
+	jr z,.nojoy1
+	; read joy1 here
+	in a,(joyport1)
+	ld (joy1),a
+.nojoy1:
+	ld a,(isrflags)
+	and 008h
+	jr z,.isr_tail
+	; call ticker1 here
+	ld hl,(tickr1)
+	call .tailcall
+		
+.isr_tail:		
 	exx
-	ex af,af'
+	ex af,af'	;'
 	ei
 	reti
+
+.tailcall:
+	jp (hl)
 
 .advance_RTC:
 if RTC_debug > 0
@@ -716,6 +770,8 @@ if VDP
 	ret
 	
 .vdp_lf:		; Advance one line
+	;ld a,(vdp_x)
+	;push af
 	ld a,(vdp_y)
 	cp vdp_lines
 	jr nz,.nextline
@@ -744,6 +800,9 @@ if VDP
 	inc e
 	dec b
 	jr nz,.clr_chr
+	;pop af
+	;xor a
+	;ld (vdp_x),a
 	ret
 
 .vdp_delay:
@@ -816,10 +875,9 @@ if VDP
 	ld a,(vdp_x)
 	dec a
 	ld (vdp_x),a
-	ld a,'_'
+	ld a,' '
 	ld c,a
 	call vdp_char
-	;out (vdp_vram),a	; Write to the VDP
 	ret
 
 vdp_put:
@@ -837,7 +895,9 @@ vdp_char:			; print char in C at coordinates in D:E
 .addloop0:
 	add hl,de
 	dec c
+	jp m,.noadd
 	jr nz,.addloop0
+.noadd:	
 	ld de,0800h		; offset for VRAM
 	add hl,de
 	ld a,l
