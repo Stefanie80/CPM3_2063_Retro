@@ -69,7 +69,7 @@ ccp	equ 0100h	; Console Command Processor gets loaded into the TPA
 	public ?pmsg,?pdec	; print message, print number from 0 to 65535
 	public ?pderr		; print BIOS disk error message header
 
-	extrn dumpivars,spamon,spamoff,dumpregs,iputs
+	extrn dumpivars,spamon,spamoff,dumpregs,iputs,usrfunc
 	
 	maclib modebaud		; define mode bits
 
@@ -124,10 +124,11 @@ ccp	equ 0100h	; Console Command Processor gets loaded into the TPA
 ?bnksl:	jmp bnksel	; select bank for code execution and default DMA
 ?stbnk:	jmp setbnk	; select different bank for disk I/O DMA operations.
 ?xmov:	jmp ?xmove	; set source and destination banks for one operation
+?userf:	jmp usrfunc
 
 	jmp 0		; reserved for future expansion
 	jmp 0		; reserved for future expansion
-	jmp 0		; reserved for future expansion
+	;jmp 0		; reserved for future expansion
 
 
 	; BOOT
