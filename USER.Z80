@@ -1,0 +1,278 @@
+; USER function for CP/M 3 BIOS
+.sysdebug equ 1
+
+
+extrn	setbank,iputs,hexdump_a
+extrn	@cbnk,@MXTPA
+
+CSEG
+
+.xmem_base:
+	dw 0h	; this must be set by the init call
+
+public tickr0,tickr1
+
+tickr0:
+	dw 0h
+tickr1:
+	dw 0h
+
+public joy0,joy1
+
+joy0:
+	db 0h
+joy1:
+	db 0h
+	
+; Calling convention:
+;
+; B = Function Group
+; C = Subfunction
+; DE & HL = Parameters / return values
+;		
+; NOTE:
+; 	The first function in the list will always be fastest.
+;	Latency is proportional to function number, which is not ideal
+;	
+
+; Function descriptions:
+;	B = 0 = Memory / System / Timer
+;		C = 0 = Save/Load block of Memory to alternate bank
+;			D = R/W flag (0=read,1=write)
+;			E = Block number
+;				 Lets just expose the whole 512k RAM as 256 blocks 
+;				 of 2kB each to the user program through an RSX.
+;				 This RSX would be attached to the user program if so desired.
+;				 It must reserve a memory window in common memory for copying in/out blocks of memory.
+;				 It will flag itself for removal at init, so the next program will have the whole TPA again.
+;		C = 1 = Initialize RAM Management
+;				 This will set the base address for the memory window
+;				 If possible, we should at this point figure out which parts of RAM are actually available
+;				 Ammount of available RAM depends on the configuration of CP/M 3 during GENCPM.
+;		C = 2 = Set timer callbacks.
+;				 Both can be set at once, one in DE, one in HL.
+;				 To disable, set to 0. You get either 2 different callbacks at 76.25 Hz each,
+;				 or set DE=HL to call the same one at 152.5 Hz.
+;		C = 3 = Save CCP
+;				 Source is hardcoded bank 1, 0x100 (The TPA)
+;				 Destination is bank E, 0x0. Size is 0x1000 (4kB)
+;		C = 4 = Restore CCP
+;				 Source is bank E, 0x0. Size is 0x1000 (4kB)
+;				 Destination is bank 1, 0x100 (The TPA)
+
+; 	B = 1 = VDP functions
+;		C = ? = Load font/pattern data from VRAM -> RAM
+;		C = ? = Load font/pattern data from RAM -> VRAM
+;		C = ? = Initialize VDP
+;				HL -> Pointer to config bytes
+;				
+;				E = Options
+;					0 = only set mode
+;
+
+;	B = 2 = Joysticks
+;		C = 0 = Read joy_0
+;		C = 1 = Read joy_1
+;		C = 2 = Read Both
+;		C = 3 = Enable/disable autopolling
+;			DE= Adress of byte buffer for joy 0
+;			HL= Adress of byte buffer for joy 1
+;				Set to 0 to disable
+
+public usrfunc
+		
+usrfunc:
+	ld a,b
+	or a				
+	jp z,.sys		; B == 0
+	dec a				
+	jp z,.vdp		; B == 1
+	dec a				
+	jp z,.joy		; B == 2	
+	;dec a			
+	; B >= 3
+	ret
+
+.sys:
+	ld a,c
+	or a				
+	jp z,.xmem		; C == 0
+	dec a
+	jp z,.mem_init	; C == 1
+	dec a
+	jp z,.tick_set	; C == 2
+	dec a
+	jp z,.mem_stccp	; C == 3
+	dec a
+	jp z,.mem_rlccp	; C == 4
+	ret
+
+.vdp:
+	ld a,c
+	or a				
+	jp z,.vdp_init	; C == 0
+	dec a
+	;jp z,.rl_ccp	; C == 1
+	ret
+	
+.joy:
+	ld a,c
+	or a				
+	jp z,.joy_0	; C == 0
+	dec a
+	jp z,.joy_1	; C == 1
+	dec a
+	jp z,.joys	; C == 2
+	ret
+
+.vdp_init:
+	ret
+	
+
+; Idea: Timer based autopolling.
+; 	If enabled, read the joystick ports in the timer ISR
+;	This ticks at 152.5 Hz, every second tick ~76 Hz.
+;	Half frequency would be easy to implement, and save I/O within the ISR.
+; 	
+; Secondary idea: Timer callback function
+;	User program supplies a memory address to be called on each/each other tick
+;	The code at that address must return with RET, not RETI. It should also be kept as short/fast as possible.
+
+.joypoll:
+	; enable autopolling
+	ret
+
+.joys:
+	; read both joysticks
+	ret
+
+.joy_0:
+	; read joystick 0
+	ret
+	
+.joy_1:
+	; read joystick 1
+	ret
+	
+	
+; Assumption: The memory below the BDOS should be free/invalid while saving/loading the CCP
+; Therefore, we can use that area to LDIR the CCP rapidly to the E bank.
+; This will clobber 0x8000-0x9000 for 4kB in a single LDIR.
+
+.mem_stccp:
+	ld a,001h
+	call setbank	; setbank 1
+	ld hl,0100h		; source 0x100
+	ld bc,01000h	; len=0x1000
+	ld de,08000h	; dest=0x8000
+	ldir
+	ld a,00Eh		
+	call setbank	; setbank E	
+	ld hl,08000h	; source 0x8000
+	ld bc,01000h	; len=0x1000
+	ld de,000h		; dest=0
+	ldir
+	ld a,001h
+	call setbank	; setbank 1
+	ret
+	
+.mem_rlccp:
+	ld a,0Eh
+	call setbank	; setbank E
+	ld hl,0h		; source 0
+	ld bc,01000h	; len=0x1000
+	ld de,08000h	; dest=0x8000
+	ldir
+	ld a,01h
+	call setbank	; setbank 1
+	ld hl,08000h	; source 0x8000
+	ld bc,01000h	; len=0x1000
+	ld de,0100h		; dest=0x100	
+	ldir
+	ret
+
+.xmem:
+	ld a,d
+	or a				
+	jp z,.xmem_load
+	jp .xmem_write
+	ret
+	
+.xmem_load:
+if .sysdebug > 0
+	call iputs
+	db  'Mload ',0
+	ld a,e
+	call hexdump_a
+	call iputs
+	db 0dh,0ah,0
+endif
+	ld a,(@cbnk)
+	push af			; save initial bank
+	; determine bank number from block number in E
+	ld a,e
+	rra
+	rra
+	rra
+	rra
+	and 00Fh
+	; set source bank
+	call setbank
+	; also determine source address within that bank
+	ld a,e
+	rla
+	rla
+	rla
+	rla
+	and 0F0h
+	ld h,a
+	ld l,0
+	; block size = 2k = 0800h
+	ld de,(.xmem_base)
+	ld bc,0800h
+	ldir
+	; reset to original bank
+	pop af
+	call setbank
+	ret
+	
+.xmem_write:
+	; determine bank number from block number in E
+	; also determine source address within that bank
+	; block size = 2k = 0800h
+
+	; set destination bank
+	;ld hl,(.xmem_base)
+	ld bc,0800h
+	;ldir
+	; reset to original bank
+	ret
+	
+.mem_init:
+if .sysdebug > 0
+	push de
+	call iputs
+	db  'Minit ',0
+	pop de
+	ld a,d
+	push de
+	call hexdump_a
+	pop de
+	ld a,e
+	push de
+	call hexdump_a
+	call iputs
+	db 0dh,0ah,0
+	pop de
+endif
+	ex de,hl
+	ld (.xmem_base),hl
+	ld de,(.xmem_base)
+	ld bc,(.xmem_base)
+	ret
+
+.tick_set:
+	ret
+
+	end
+	
