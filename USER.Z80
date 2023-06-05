@@ -195,13 +195,77 @@ usrfunc:
 	ld a,d
 	or a				
 	jp z,.xmem_load
-	jp .xmem_write
+	dec a
+	jp z,.xmem_write
+if .sysdebug > 0
+	call iputs
+	db  'Merr ',0
+	ld a,d
+	call hexdump_a
+	call iputs
+	db 0dh,0ah,0
+endif
 	ret
 	
 .xmem_load:
 if .sysdebug > 0
 	call iputs
 	db  'Mload ',0
+	ld a,e
+	call hexdump_a
+	call iputs
+	db ' ',0
+endif
+	ld a,(@cbnk)
+	push af			; save initial bank
+	; determine bank number from block number in E
+	ld a,e
+	rra
+	rra
+	rra
+	rra
+	and 00Fh
+if .sysdebug > 0
+	push af
+	call hexdump_a
+	call iputs
+	db ':',0	
+	pop af
+endif	
+	; set source bank
+	call setbank
+	; also determine source address within that bank
+	ld a,e
+	rla
+	rla
+	rla
+	rla
+	and 0F0h
+	scf
+	ccf
+	rra
+if .sysdebug > 0
+	push af
+	call hexdump_a
+	call iputs
+	db 0dh,0ah,0	
+	pop af
+endif	
+	ld h,a
+	ld l,0
+	; block size = 2k = 0800h
+	ld de,(.xmem_base)
+	ld bc,0800h
+	ldir
+	; reset to original bank
+	pop af
+	call setbank
+	ret
+	
+.xmem_write:
+if .sysdebug > 0
+	call iputs
+	db  'Msave ',0
 	ld a,e
 	call hexdump_a
 	call iputs
@@ -216,7 +280,7 @@ endif
 	rra
 	rra
 	and 00Fh
-	; set source bank
+	; set destination bank
 	call setbank
 	; also determine source address within that bank
 	ld a,e
@@ -225,27 +289,20 @@ endif
 	rla
 	rla
 	and 0F0h
+	scf
+	ccf
+	rra
 	ld h,a
 	ld l,0
+	ex de,hl
+
+	ld hl,(.xmem_base)
 	; block size = 2k = 0800h
-	ld de,(.xmem_base)
 	ld bc,0800h
 	ldir
-	; reset to original bank
+	;reset to original bank
 	pop af
 	call setbank
-	ret
-	
-.xmem_write:
-	; determine bank number from block number in E
-	; also determine source address within that bank
-	; block size = 2k = 0800h
-
-	; set destination bank
-	;ld hl,(.xmem_base)
-	ld bc,0800h
-	;ldir
-	; reset to original bank
 	ret
 	
 .mem_init:
