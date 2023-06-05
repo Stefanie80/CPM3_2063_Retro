@@ -914,16 +914,59 @@ vdp_char:			; print char in C at coordinates in D:E
 	; out (vdp_vram),a	; Write to the VDP
 	ret
 
+.vdp_ul:
+	ld hl,vdp_y
+	dec (hl)
+	ret
+
+.vdp_fs:
+	ld hl,vdp_x
+	inc (hl)
+	ret
+	
+.vdp_cls:
+	ld hl,0800h		; offset for VRAM
+	ld a,l
+	out (vdp_reg),a
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	ld b,80
+	ld c,24
+	ld a,' '
+.cls:	
+	out (vdp_vram),a	; Write to the VDP
+	call .vdp_delay
+	dec b
+	jr nz,.cls
+	dec c
+	jr nz,.cls
+	ret
+		
+.vdp_home:
+	xor a
+	ld (vdp_x),a
+	ld (vdp_y),a
+	ret
+	
 vdp_out:
 	;call spamon
 	ld a,c
-	cp a,lf			; linefeed
+	cp a,00Ah		; linefeed
 	jp z,.vdp_lf
-	cp a,cr			; carriage return
+	cp a,00Dh		; carriage return
 	jp z,.vdp_cr
-	cp a,08h		; Backspace
+	cp a,008h		; Backspace
 	jp z,.vdp_bs
-					; if we get here, we have a printable character
+	cp a,00Bh		; Upline
+	jp z,.vdp_ul
+	cp a,00Ch		; Forespace
+	jp z,.vdp_fs
+	cp a,01Ah		; CLS
+	jp z,.vdp_cls
+	cp a,01Eh		; Home
+	jp z,.vdp_home
+			; if we get here, we have a printable character
 	ld a,(vdp_x)
 	ld e,a
 	ld a,(vdp_y)
