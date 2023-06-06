@@ -906,6 +906,12 @@ vdp_char:			; print char in C at coordinates in D:E
 	or h
 	out (vdp_reg),a	; VDP address loaded
 	pop bc
+	ld a,(vdp_rev)
+	or a
+	jr z,.notrev
+	ld a,c
+	or 080h
+.notrev:	
 	ld a,c
 	out (vdp_vram),a	; Write to the VDP
 	;print a cursor
@@ -948,10 +954,98 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld (vdp_x),a
 	ld (vdp_y),a
 	ret
+
+.vdp_escape:
+	ld a,1
+	ld (vdp_esc),a
+	ret
+
+.term_cmd:
+	ld a,(vdp_state)
+	or a
+	jp z,.state0
+	dec a
+	jp z,.term_atr
+	jp .term_xy
+.state0:	
+	ld a,c
+	cp '='
+	jp z,.term_xy
+	cp 'G'
+	jp z,.term_atr
+	ret
+	
+.term_xy:
+	ld a,(vdp_state)
+	or a
+	jp z,.xy_state0
+	dec a
+	jp z,.xy_end
+	dec a
+	jp z,.xy_row
+	dec a
+	jp z,.xy_col
+	ret
+.xy_row:
+	ld a,c
+	sub 32
+	ld (vdp_y),a
+	ld hl,vdp_state
+	inc (hl)
+	ret
+.xy_col:
+	ld a,c
+	sub 32
+	ld (vdp_x),a
+	jp .xy_end
+.xy_state0:
+	ld a,2
+	ld (vdp_state),a
+	ret
+.xy_end:
+	xor a
+	ld (vdp_state),a
+	ld (vdp_esc),a
+	ret
+
+.term_atr:
+	ld a,(vdp_state)
+	or a
+	jp z,.atr_state0
+	dec a
+	jp nz,.atr_end
+	ld a,c
+	cp '0'
+	jp z,.vdp_mode_def
+	cp '4'
+	jp z,.vdp_mode_rev
+	ret
+.atr_state0:
+	ld a,1
+	ld (vdp_state),a
+	ret
+.atr_end:
+	xor a
+	ld (vdp_state),a
+	ld (vdp_esc),a
+	ret
+.vdp_mode_def:
+	xor a
+	ld (vdp_rev),a
+	ret
+.vdp_mode_rev:
+	ld a,1
+	ld (vdp_rev),a
+	ret
+
 	
 vdp_out:
-	;call spamon
+	ld a,(vdp_esc)
+	or a
+	jp nz,.term_cmd
 	ld a,c
+	cp a,01Bh
+	jp z,.vdp_escape
 	cp a,00Ah		; linefeed
 	jp z,.vdp_lf
 	cp a,00Dh		; carriage return
@@ -982,27 +1076,27 @@ vdp_out:
 	;call vdp_char
 	ret
 
-.calc_pos:
-	ld hl,0
-	ld a,(vdp_y)
-	or a
-	jr z,.addcol
-	; HL += (vdp_y) * (vdp_cols)
-	ld bc,0
-	ld de,0
-	ld c,a
-	ld a,vdp_cols
-	ld e,a
-.addloop:
-	add hl,de
-	dec c
-	jr nz,.addloop
-.addcol:
-	ld a,(vdp_x)
-	ld de,0
-	ld e,a
-	add hl,de
-	ret
+; .calc_pos:
+	; ld hl,0
+	; ld a,(vdp_y)
+	; or a
+	; jr z,.addcol
+	; ; HL += (vdp_y) * (vdp_cols)
+	; ld bc,0
+	; ld de,0
+	; ld c,a
+	; ld a,vdp_cols
+	; ld e,a
+; .addloop:
+	; add hl,de
+	; dec c
+	; jr nz,.addloop
+; .addcol:
+	; ld a,(vdp_x)
+	; ld de,0
+	; ld e,a
+	; add hl,de
+	; ret
 
 
 vdp_vram			equ	080h	; VDP port for accessing the VRAM
@@ -1011,6 +1105,9 @@ vdp_lines			equ 23
 vdp_cols			equ 40
 vdp_x:				db 0
 vdp_y:				db 0
+vdp_esc:			db 0
+vdp_state:			db 0
+vdp_rev:			db 0
 
 endif
 

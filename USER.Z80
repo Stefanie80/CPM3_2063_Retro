@@ -719,7 +719,7 @@ db 070h,020h,030h,060h,000h,000h,000h,000h ; 0FC
 db 060h,010h,020h,070h,000h,000h,000h,000h ; 0FD
 db 000h,000h,078h,078h,078h,078h,000h,000h ; 0FE
 db 000h,000h,000h,000h,000h,000h,000h,000h 	; 0FF
-.font_len equ	$-.font_6x8				   ; number of bytes to write
+
 endif 
 
 .vdpinit:

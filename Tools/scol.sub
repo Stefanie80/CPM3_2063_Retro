@@ -1,4 +1,4 @@
 r Tools\setcol.z80
 zmac setcol
-link setcol
-w setcol.com b
+link color=setcol
+w color.com b
