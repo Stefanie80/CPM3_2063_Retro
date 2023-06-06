@@ -1019,7 +1019,11 @@ vdp_char:			; print char in C at coordinates in D:E
 	jp z,.vdp_mode_def
 	cp '4'
 	jp z,.vdp_mode_rev
-	ret
+	cp 'P'
+	jp z,.vdp_mode_def
+	cp 'T'
+	jp z,.vdp_mode_rev
+	jp .atr_end
 .atr_state0:
 	ld a,1
 	ld (vdp_state),a
