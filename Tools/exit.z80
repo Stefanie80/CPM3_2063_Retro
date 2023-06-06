@@ -1,0 +1,5 @@
+DI
+
+NOP
+
+HALT
