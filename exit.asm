@@ -1,5 +1,0 @@
-DI
-
-NOP
-
-HALT
