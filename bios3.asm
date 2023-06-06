@@ -475,6 +475,7 @@ siob_tx_ready:
 ;##############################################################
 con_rx_ready:
 sioa_rx_ready:
+	call curs_tick
 	in	a,(sio_ac)	; read sio control status byte
 	and	1		; check the rcvr ready bit
 	ret			; 0 = not ready
@@ -765,13 +766,13 @@ if VDP
 .debug_vdp:		equ 1
 	
 .vdp_cr:		; Return to start of line
+	call vdp_curs
 	xor a
 	ld (vdp_x),a
 	ret
 	
 .vdp_lf:		; Advance one line
-	;ld a,(vdp_x)
-	;push af
+	;call vdp_curs	
 	ld a,(vdp_y)
 	cp vdp_lines
 	jr nz,.nextline
@@ -1071,37 +1072,55 @@ vdp_out:
 	ld d,a
 	call vdp_char
 					; advance cursor position
-	;ld a,(vdp_x)
 	ld hl,vdp_x
 	inc (hl)
-	;print a cursor
-	;ld a,'_'
-	;ld c,a
-	;call vdp_char
+	;call vdp_cursor
 	ret
 
-; .calc_pos:
-	; ld hl,0
-	; ld a,(vdp_y)
-	; or a
-	; jr z,.addcol
-	; ; HL += (vdp_y) * (vdp_cols)
-	; ld bc,0
-	; ld de,0
-	; ld c,a
-	; ld a,vdp_cols
-	; ld e,a
-; .addloop:
-	; add hl,de
-	; dec c
-	; jr nz,.addloop
-; .addcol:
-	; ld a,(vdp_x)
-	; ld de,0
-	; ld e,a
-	; add hl,de
-	; ret
+vdp_cursor:
+	ld a,(vdp_x)
+	or a
+	jr z,.curende
+	ld a,(vdp_x)
+	ld e,a
+	ld a,(vdp_y)
+	ld d,a
+	ld a,(cursor)
+	ld c,a
+	call vdp_char
+.curende:	
+	ret
+	
+vdp_curs:
+	ld a,(vdp_x)
+	or a
+	jr z,.curend
+	ld a,(vdp_x)
+	ld e,a
+	ld a,(vdp_y)
+	ld d,a
+	ld a,' '
+	ld c,a
+	call vdp_char
+.curend:
+	ret
 
+curs_tick:
+	ld hl,(c_tick)
+	inc hl
+	ld (c_tick),hl
+	ld a,h
+	and 010h
+	jr z,.zer0
+	ld a,(curs1)
+	ld (cursor),a
+	call vdp_cursor
+	ret
+.zer0:	
+	ld a,(curs0)
+	ld (cursor),a
+	call vdp_cursor
+	ret
 
 vdp_vram			equ	080h	; VDP port for accessing the VRAM
 vdp_reg				equ	081h	; VDP port for accessing the registers
@@ -1112,7 +1131,10 @@ vdp_y:				db 0
 vdp_esc:			db 0
 vdp_state:			db 0
 vdp_rev:			db 0
-
+cursor:				db '_'
+curs0:				db '_'
+curs1:				db ' '
+c_tick:				dw 0
 endif
 
 	end
