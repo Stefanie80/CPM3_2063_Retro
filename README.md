@@ -21,10 +21,12 @@ Submit-Files (.SUB) will be provided for CPM3.SYS and all the tools. For buildin
 you'd run the command "r cpm3.sub" in the simulator. That will read cpm3.sub and save it to the simulators filesystem.
 Then you can run "submit cpm3". The submit file will then read all required sources from the host into the simulator,
 compile them, and write the resulting CPM3.SYS back out to the host file system.
+
 For this build process to work, you need to place the following files from the simulator package into the repo folder:
 altairz80.exe,cpm3,cpm3.dsk
 Once you start the .exe, you have to enter "do cpm3" to start the system.
 Once it is booted, switch to drive I: to initialize it, then switch back to A: and copy over some tools to the I: drive.
+
 Specifically, you will need to copy RMAC.COM,ZMAC.COM,R.COM,W.COM,SUBMIT.COM,GENCPM.COM,RENAME.COM and LINK.COM.
 You have to use the CP/M tool PIP for this. The general syntax is "PIP dest=source". 
 For example: "PIP I:=RMAC.COM" will copy RMAC.COM from the drive you are on to drive I:
