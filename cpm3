@@ -1,0 +1,14 @@
+d tracks[0-7] 254
+attach dsk cpm3.dsk
+attach hdsk0 i.dsk
+attach hdsk1 j.dsk
+attach hdsk2 k.dsk
+attach hdsk3 l.dsk
+d common c000
+set cpu 64k
+set cpu banked
+set cpu itrap
+set cpu z80
+set cpu altairrom
+set sio nosleep
+boot dsk
