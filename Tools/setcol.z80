@@ -1,0 +1,154 @@
+org 0100h
+
+BDOS equ 5
+
+BIOSPB: 
+func:	db 30	; BIOS function no.
+areg: 	db 0 	; A register contents
+creg:	db 1 	;
+breg: 	db 0 	; BC register contents
+dereg:	dw 0 	; DE register contents
+hlreg:	dw 0 	; HL register contents
+
+call iputs
+db 'Current Colors: ',0
+
+ld a,5
+ld (creg),a
+ld a,1
+ld (breg),a
+ld de,0
+ld (dereg),de
+ld c,032h
+ld de,BIOSPB
+call BDOS	
+
+push af
+and 0Fh
+call hex_a
+call iputs
+db ' ',0
+pop af
+rra
+rra
+rra
+rra
+and 0Fh
+call hex_a
+
+call iputs
+db 0dh,0ah,0
+
+ld hl,080h
+ld a,(hl)
+or a
+jp z,.notail
+sub 4
+jp nz,.notail
+inc hl
+inc hl
+ld a,(hl)		; background Color
+call .convert	; a==BG value
+ld b,a
+inc hl
+inc hl
+ld a,(hl)		; foreground Color
+call .convert
+rla
+rla
+rla
+rla
+and 0F0h
+or b
+ld e,a
+ld d,1
+ld (dereg),de
+
+ld a,5
+ld (creg),a
+ld a,1
+ld (breg),a
+ld c,032h
+ld de,BIOSPB
+call BDOS	
+
+ret
+
+.convert:
+	cp 103
+	jp nc,.notail	; >103 not a character
+	cp 97
+	jp c,.notlower
+	sub 32			; converted to upper case
+.notlower:
+	cp 71
+	jp nc,.notail	; weird?
+	cp 65
+	jp c,.notupper
+	sub 55
+	jp .gotit
+.notupper:
+	cp 58
+	jp nc,.notail
+	cp 48
+	jp c,.notail
+	sub 48
+.gotit:
+	ret
+
+.notail:
+	call iputs
+	db 'Usage:',0dh,0ah
+	db 'SETCOL <BG> <FG>',0dh,0ah
+	db 0dh,0ah
+	db '   Where <BG> <FG> are ',0dh,0ah
+	db '   single hex digits 0..F',0dh,0ah,0
+	ret
+
+hex_a:
+	push	af
+	srl	a
+	srl	a
+	srl	a
+	srl	a
+	call	.hexdump_nib
+	pop	af
+	push	af
+	and	00fh
+	call	.hexdump_nib
+	pop	af
+	ret
+
+.hexdump_nib:
+	add	'0'
+	cp	'9'+1
+	jp	m,.hexdump_num
+	add	'A'-'9'-1
+.hexdump_num:
+	ld c,2
+	ld	e,a
+	jp	BDOS	   ; tail
+	
+
+iputs:
+    ex (sp),hl                 ; hl = @ of string to print
+	call .puts_loop
+    inc hl                      ; point past the end of the string
+    ex (sp),hl
+    ret
+
+.puts_loop:
+    ld a,(hl)                  ; get the next byte to send
+    or a
+    jr z,.puts_done             ; if A is zero, return
+    ld e,a
+	ld c,2
+	push hl
+    call 5
+	pop hl
+    inc hl                      ; point to next byte to write
+    jp .puts_loop
+.puts_done:
+    ret
+
+end

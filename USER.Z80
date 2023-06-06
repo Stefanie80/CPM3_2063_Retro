@@ -78,7 +78,9 @@ joy1:
 ;		C = 4 = Convert Font in memory
 ;			HL= Pointer to memory buffer
 ;				High order 128 chars will be inverted of low order chars
-;		C = 5 = Set Colors
+;		C = 5 = Get/Set Colors
+;			D = 0=get 1=set
+;			E = FG:BG color code, 4 bit each
 
 ;	B = 2 = Joysticks
 ;		C = 0 = Read joy_0
@@ -142,7 +144,28 @@ usrfunc:
 	ret
 
 .vdp_col:
+	ld a,d
+	or a				
+	jr z,.getcol	; C == 0
+	dec a
+	jr z,.setcol	; C == 1
+	;error
 	ret
+.getcol:
+	ld hl,.vdpcol
+	ld a,(hl)
+	ret
+.setcol:
+	ld hl,.vdpcol
+	ld (hl),e
+	ld	a,e				; LSB
+	out	(vdp_reg),a
+	call .vdp_delay
+	ld	a,087h			; MSB
+	out	(vdp_reg),a
+	ret
+	
+	
 	
 .vdp_cv:
 	ex de,hl
@@ -700,11 +723,11 @@ db 000h,000h,000h,000h,000h,000h,000h,000h 	; 0FF
 endif 
 
 .vdpinit:
-	db	00000000b,080h	; R0 = Text mode, no EXT video
-	db	11010000b,081h	; R1 = 16K RAM, enable display, disable INT, 8x8 sprites, mag off
-	db	00000010b,082h	; R2 = name table = 0x0800
-	db	00000000b,084h	; R4 = pattern table = 0x0000
-	db	11110101b,087h	; R7 = white on light blue
+			db	00000000b,080h	; R0 = Text mode, no EXT video
+			db	11010000b,081h	; R1 = 16K RAM, enable display, disable INT, 8x8 sprites, mag off
+			db	00000010b,082h	; R2 = name table = 0x0800
+			db	00000000b,084h	; R4 = pattern table = 0x0000
+.vdpcol:	db	11110101b,087h	; R7 = white on light blue
 .vdpinit_len: equ	$-.vdpinit	; number of bytes to write
 
 
