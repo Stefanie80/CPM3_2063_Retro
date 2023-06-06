@@ -1,3 +1,10 @@
 altairz80.exe
 cpm3.
 *.dsk
+CPM3.SYS
+*.COM
+*.RSX
+*.SPR
+*.PRL
+*.REL
+*.lib

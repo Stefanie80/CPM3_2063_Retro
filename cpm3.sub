@@ -10,31 +10,23 @@ r z80.lib
 r cpm3.lib
 
 r bioskrnl.asm
-RMAC BIOSKRNL.ASM
-
 r scb.asm
-RMAC SCB.ASM
-
 r move.asm
-ZMAC MOVE.ASM
-
 r boot.asm
-RMAC BOOT.ASM
-
 r drvtbl.asm
-RMAC DRVTBL.ASM
-
 r dump.asm
-zmac dump.asm
-
 r bios3.asm
-; compiling ZMAC sources ...
-zmac bios3.asm
-
 r sdd.z80
-zmac sdd.z80
-
 r user.z80
+
+RMAC BIOSKRNL.ASM
+RMAC SCB.ASM
+ZMAC MOVE.ASM
+RMAC BOOT.ASM
+RMAC DRVTBL.ASM
+zmac dump.asm
+zmac bios3.asm
+zmac sdd.z80
 zmac user.z80
 
 ; linking ...

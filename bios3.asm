@@ -941,7 +941,7 @@ vdp_char:			; print char in C at coordinates in D:E
 	jr nz,.cls
 	dec c
 	jr nz,.cls
-	ret
+	; fall through into Home
 		
 .vdp_home:
 	xor a
@@ -1004,8 +1004,6 @@ vdp_out:
 	add hl,de
 	ret
 
-;screenbuf:
-;	ds 960	; 40x24 characters
 
 vdp_vram			equ	080h	; VDP port for accessing the VRAM
 vdp_reg				equ	081h	; VDP port for accessing the registers
@@ -1013,7 +1011,7 @@ vdp_lines			equ 23
 vdp_cols			equ 40
 vdp_x:				db 0
 vdp_y:				db 0
-;vdp_addr:			dw 0
+
 
 if VDP_font > 0
 .font_6x8:

@@ -69,8 +69,22 @@ endif
 	lxi d,ccp$fcb ! call read	; load the thing
 					; now, copy CCP to bank 0 for reloading
 	lda @cbnk ! push psw		; save current bank
-	lxi b,0003h	; B=0=sys,C=3=save CCP
+	
+	lxi b,0003h					; B=0=sys,C=3=save CCP
 	call usrfunc
+	
+	lxi b,0001h					; B=0=sys,C=1=Init
+	lxi d,08000h				; window base=common memory
+	call usrfunc
+
+	lxi b,0103h					; B=1=vdp,C=3=read font
+	lxi h,08000h				; save to common memory
+	call usrfunc
+
+	lxi b,0000h					; B=0=sys,C=0=RW block
+	lxi d,01E2h					; D=1=write, block number E2 (E0+E1 used for CCP)
+	call usrfunc
+
 	pop psw ! call ?bnksl		; restore original bank
 	ret
 
@@ -80,8 +94,25 @@ no$CCP:			; here if we couldn't find the file
 	jmp ?ldccp			; and try again
 
 ?rlccp:
-	lxi b,0004h	; B=0=sys,C=3=save CCP
+	lxi b,0004h	; B=0=sys,C=4=load CCP
 	call usrfunc
+
+	lxi b,0001h					; B=0=sys,C=1=Init
+	lxi d,08000h				; window base=common memory
+	call usrfunc
+
+	lxi b,0101h					; B=1=vdp,C=1=Init
+	lxi d,08000h				; window base=common memory
+	call usrfunc
+
+	lxi b,0000h					; B=0=sys,C=0=RW block
+	lxi d,00E2h					; D=0=read, block number E2 (E0+E1 used for CCP)
+	call usrfunc
+
+	lxi b,0102h					; B=1=vdp,C=2=load font
+	lxi h,08000h				; save to common memory
+	call usrfunc
+
 	ret
 
     ; No external clock.

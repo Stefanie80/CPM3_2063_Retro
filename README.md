@@ -13,10 +13,23 @@ The sources written by me, and the parts taken from John's code are written
 in Z80 assembly and compile with ZMAC. I will include the ZMAC.COM binary 
 here, because i could not find a source online.
 
-For building the sources, i reccomend the Altair Z80 Simulator from 
+For building the sources, I use the Altair Z80 Simulator from 
 http://www.s100computers.com/Software%20Folder/Altair%20Simmulator/Altair%20Software.htm
 
-I have included .SUB files for building CPM3.SYS and the bootloader LDR.BIN
+This simulator is very handy for CP/M development, because it provides an easy way to transfer files in and out of the simulated system.
+Submit-Files (.SUB) will be provided for CPM3.SYS and all the tools. For building CPM3.SYS for example, 
+you'd run the command "r cpm3.sub" in the simulator. That will read cpm3.sub and save it to the simulators filesystem.
+Then you can run "submit cpm3". The submit file will then read all required sources from the host into the simulator,
+compile them, and write the resulting CPM3.SYS back out to the host file system.
+For this build process to work, you need to place the following files from the simulator package into the repo folder:
+altairz80.exe,cpm3,cpm3.dsk
+Once you start the .exe, you have to enter "do cpm3" to start the system.
+Once it is booted, switch to drive I: to initialize it, then switch back to A: and copy over some tools to the I: drive.
+Specifically, you will need to copy RMAC.COM,ZMAC.COM,R.COM,W.COM,SUBMIT.COM,GENCPM.COM,RENAME.COM and LINK.COM.
+You have to use the CP/M tool PIP for this. The general syntax is "PIP dest=source". 
+For example: "PIP I:=RMAC.COM" will copy RMAC.COM from the drive you are on to drive I:
+To read ZMAC.COM you need to enter "r Tools\ZMAC.COM"
+You will also need some files from the CP/M 3 distribution disk.
 
 For those who do not wish to tinker with the source, or want to try the system before diving into it, 
 i have prepared a package containing a fully running system with an emulator of John's board. You can download it here:
