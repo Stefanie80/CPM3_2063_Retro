@@ -75,7 +75,10 @@ joy1:
 ;		C = 3 = Load font/pattern data from VRAM -> RAM
 ;			HL= Pointer to memory buffer
 ;				Size is hardcoded as (256*8*8)=2kB
-;		C = 4 = Set Colors
+;		C = 4 = Convert Font in memory
+;			HL= Pointer to memory buffer
+;				High order 128 chars will be inverted of low order chars
+;		C = 5 = Set Colors
 
 ;	B = 2 = Joysticks
 ;		C = 0 = Read joy_0
@@ -123,7 +126,9 @@ usrfunc:
 	dec a
 	jp z,.vdp_rdfnt	; C == 3
 	dec a
-	jp z,.vdp_col	; C == 4
+	jp z,.vdp_cv	; C == 4
+	dec a
+	jp z,.vdp_col	; C == 5
 	ret
 	
 .joy:
@@ -137,6 +142,28 @@ usrfunc:
 	ret
 
 .vdp_col:
+	ret
+	
+.vdp_cv:
+	ex de,hl
+	ld hl,0400h
+	add hl,de
+	ex de,hl
+	; HL=source, DE=destination
+	ld c,128
+.cvloop:
+	ld b,8
+.cvlop:	
+	ld a,(hl)
+	neg
+	dec a
+	ld (de),a
+	inc hl
+	inc de
+	dec b
+	jr nz,.cvlop
+	dec c
+	jr nz,.cvloop
 	ret
 	
 .vdp_init:

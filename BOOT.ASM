@@ -85,6 +85,14 @@ endif
 	lxi d,01E2h					; D=1=write, block number E2 (E0+E1 used for CCP)
 	call usrfunc
 
+	lxi b,0104h					; B=1=vdp,C=4=convert font
+	lxi h,08000h				; save to common memory
+	call usrfunc
+
+	lxi b,0000h					; B=0=sys,C=0=RW block
+	lxi d,01E3h					; D=1=write, block number E3 (E0+E1 used for CCP, E2=ANSI font)
+	call usrfunc
+
 	pop psw ! call ?bnksl		; restore original bank
 	ret
 
@@ -94,7 +102,7 @@ no$CCP:			; here if we couldn't find the file
 	jmp ?ldccp			; and try again
 
 ?rlccp:
-	lxi b,0004h	; B=0=sys,C=4=load CCP
+	lxi b,0004h					; B=0=sys,C=4=load CCP
 	call usrfunc
 
 	lxi b,0001h					; B=0=sys,C=1=Init
@@ -102,15 +110,14 @@ no$CCP:			; here if we couldn't find the file
 	call usrfunc
 
 	lxi b,0101h					; B=1=vdp,C=1=Init
-	lxi d,08000h				; window base=common memory
 	call usrfunc
 
 	lxi b,0000h					; B=0=sys,C=0=RW block
-	lxi d,00E2h					; D=0=read, block number E2 (E0+E1 used for CCP)
+	lxi d,00E3h					; D=0=read, block number E3 (font with inverted upper chars)
 	call usrfunc
 
 	lxi b,0102h					; B=1=vdp,C=2=load font
-	lxi h,08000h				; save to common memory
+	lxi h,08000h				; read from common memory
 	call usrfunc
 
 	ret
