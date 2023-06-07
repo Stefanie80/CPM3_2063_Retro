@@ -4,6 +4,7 @@ org 0100h
 
 ld c,0FFh
 ld b,01h
+ld de,0
 call 5
 ex de,hl
 ld (.memwin),hl
@@ -19,53 +20,57 @@ call hex_a
 pop hl
 ld a,l
 call hex_a
-
 call iputs
 db 0dh,0ah,0
 
-ld c,0FFh
-ld b,0
-ld d,0
-ld e,010h
-call 5
-
-call iputs
-db 'Call 1: ',0
-ld hl,(.memwin)
-ld c,16
-.lop:
-ld a,(hl)
-push hl
-push bc
-call hex_a
-pop bc
-pop hl
-inc hl
-dec c
-jr nz,.lop
-call iputs
-db 0dh,0ah,0
-
-ld c,0FFh
-ld b,0
-ld d,0
-ld e,0Eh
-call 5
-
-call iputs
-db 'Call 2: ',0
-ld hl,(.memwin)
-ld c,16
-.lop1:
-ld a,(hl)
-push hl
-push bc
-call hex_a
-pop bc
-pop hl
-inc hl
-dec c
-jr nz,.lop1
+xor a
+ld d,16
+.nextblock:
+	push af
+	push de
+	; load the next block
+	ld c,0FFh
+	ld b,0
+	ld d,0
+	ld e,a
+	call 5
+	ld hl,(.memwin)	
+	
+	ld b,128
+	.lopp:
+		ld c,16
+		.lop:
+			ld a,(hl)
+			or a
+			jr z,.next
+			;notzero
+			push bc
+			call iputs
+			db '*',0
+			pop bc
+			jr .blockend
+		.next:
+			dec c
+			jr nz,.lop
+		dec b
+		jr nz,.lopp
+		push bc
+		call iputs
+		db '0',0
+		pop bc
+.blockend:
+	pop de
+	dec d
+	jr nz,.noline
+	ld d,16
+	push de
+	call iputs
+	db 0dh,0ah,0
+	pop de
+.noline:	
+	pop af
+	inc a
+	jr nz,.nextblock
 
 ret
 

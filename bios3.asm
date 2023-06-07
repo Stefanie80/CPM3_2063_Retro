@@ -877,6 +877,9 @@ if VDP
 	ret
 
 .vdp_bs:
+	ld a,' '
+	ld c,a
+	call vdp_char
 	ld a,(vdp_x)
 	dec a
 	ld (vdp_x),a
@@ -1113,6 +1116,9 @@ curs_tick:
 	ld hl,(c_tick)
 	inc hl
 	ld (c_tick),hl
+	ld a,(c_mode)
+	or a
+	jp nz,.cmode1
 	ld a,h
 	and 010h
 	jr z,.zer0
@@ -1125,6 +1131,54 @@ curs_tick:
 	ld (cursor),a
 	call vdp_cursor
 	ret
+.cmode1:
+	ld a,(vdp_x)
+	or a
+	jp z,.ende
+	ld a,h
+	and 040h
+	jp z,.ende
+	ld hl,0			; clear HL
+	ld (c_tick),hl
+	ld a,(vdp_x)
+	ld l,a	
+	ld a,(vdp_y)
+	ld c,a
+	ld de,0			; clear DE
+	ld a,vdp_cols
+	ld e,a
+.addloop1:
+	add hl,de
+	dec c
+	jp m,.noadd1
+	jr nz,.addloop1
+.noadd1:	
+	ld de,0800h		; offset for VRAM
+	add hl,de
+	ld a,l
+	out (vdp_reg),a
+	call .vdp_delay
+	xor a
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	call .vdp_delay
+	in a,(vdp_vram)
+	call .vdp_delay
+	xor 080h
+	push af
+	ld a,l
+	out (vdp_reg),a
+	call .vdp_delay
+	ld a,040h		
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	call .vdp_delay
+	pop af
+	out (vdp_vram),a
+.ende:	
+	ret
+
+
 
 vdp_vram			equ	080h	; VDP port for accessing the VRAM
 vdp_reg				equ	081h	; VDP port for accessing the registers
@@ -1136,9 +1190,10 @@ vdp_esc:			db 0
 vdp_state:			db 0
 vdp_rev:			db 0
 cursor:				db '_'
-curs0:				db '_'
+curs0:				db 0A0h	;'_'
 curs1:				db ' '
 c_tick:				dw 0
+c_mode:				db 0
 endif
 
 	end
