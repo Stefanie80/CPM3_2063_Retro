@@ -34,6 +34,7 @@ LINK BNKBIOS3[OS]=BIOSKRNL,SCB,BOOT,bios3,sdd,dump,user,MOVE,DRVTBL
 
 r bnkbdos3.spr
 r resbdos3.spr
+r gencpm.dat
 
 ; GENCPM
 gencpm auto

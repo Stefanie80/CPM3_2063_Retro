@@ -3,7 +3,7 @@ start:		jp pstart		; start of Program
 next: 		db 0c3h 		; jump instruction to
 			dw 0			; next module in line
 Prev: 		dw 0 			; Previous module
-remove: 	db 0	 		; remove flag
+remove: 	db 0FFh	 		; remove flag
 nonbank: 	db 0 			; nonbank flag
 name: 		db 'XMM      ' 	; any B-character name
 loader: 	db 0,0,0 		; loader flag
