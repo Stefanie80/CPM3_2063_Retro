@@ -41,6 +41,7 @@ ld d,16
 		ld c,16
 		.lop:
 			ld a,(hl)
+			inc hl
 			or a
 			jr z,.next
 			;notzero

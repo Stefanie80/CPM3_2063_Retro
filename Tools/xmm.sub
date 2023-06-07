@@ -1,8 +1,9 @@
-r xmm.z80
+r Tools\xmm.z80
 zmac xmm
 link xmm [op]
+era xmm.rsx
 ren xmm.rsx=xmm.prl
-r xmms.z80
+r Tools\xmms.z80
 zmac xmms
 link xmms
 
