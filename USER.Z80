@@ -1,6 +1,7 @@
 ; USER function for CP/M 3 BIOS
 .sysdebug 	equ 0
 .vdpdebug 	equ 0
+VDP			equ 1
 VDP_font 	equ 0
 cr			equ	0dh		; carriage return
 lf			equ	0ah		; line feed
@@ -118,6 +119,7 @@ usrfunc:
 	ret
 
 .vdp:
+if VDP
 	ld a,c
 	or a				
 	jp z,.vdp_pp	; C == 0
@@ -131,6 +133,7 @@ usrfunc:
 	jp z,.vdp_cv	; C == 4
 	dec a
 	jp z,.vdp_col	; C == 5
+endif
 	ret
 	
 .joy:
@@ -143,6 +146,7 @@ usrfunc:
 	jp z,.joys	; C == 2
 	ret
 
+if VDP
 .vdp_col:
 	ld a,d
 	or a				
@@ -164,9 +168,7 @@ usrfunc:
 	ld	a,087h			; MSB
 	out	(vdp_reg),a
 	ret
-	
-	
-	
+		
 .vdp_cv:
 	ex de,hl
 	ld hl,0400h
@@ -239,6 +241,7 @@ endif
 	jp	nz,.rdfnt_loop
 	ret
 
+endif
 
 
 ; Idea: Timer based autopolling.
@@ -447,6 +450,7 @@ endif
 .tick_set:
 	ret
 
+if VDP
 .vdp_delay:
 	push hl
 	pop hl
@@ -724,7 +728,7 @@ endif
 			db	00000000b,084h	; R4 = pattern table = 0x0000
 .vdpcol:	db	11110101b,087h	; R7 = white on light blue
 .vdpinit_len: equ	$-.vdpinit	; number of bytes to write
-
+endif
 
 	end
 	

@@ -409,6 +409,11 @@ endif
 	ret
 
 ?cist:
+if VDP
+	push bc
+	call curs_tick
+	pop bc
+endif
 	ld a,b
 	or a
 	jr nz,.nota
@@ -475,7 +480,6 @@ siob_tx_ready:
 ;##############################################################
 con_rx_ready:
 sioa_rx_ready:
-	call curs_tick
 	in	a,(sio_ac)	; read sio control status byte
 	and	1		; check the rcvr ready bit
 	ret			; 0 = not ready
