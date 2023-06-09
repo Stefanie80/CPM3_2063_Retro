@@ -1,0 +1,141 @@
+org 0100h
+
+BDOS equ 5
+
+BIOSPB: 
+func:	db 30	; BIOS function 30 = USER
+areg: 	db 0 	; A register contents
+creg:	db 1 	; C register contents
+breg: 	db 0 	; B register contents
+dereg:	dw 0 	; DE register contents
+hlreg:	dw 0 	; HL register contents
+
+call iputs
+db 01Ah,0dh,0ah,0		; Clear the screen
+call iputs
+db 'Joystick values',0dh,0ah,0		; Clear the screen
+call iputs
+db '(Any key to exit)',0dh,0ah,0		; Clear the screen
+
+start:
+
+call iputs
+db 01Bh,'=',35,35,0	; This should set cursor to 3,3
+
+ld a,2
+ld (breg),a		; B = 2 = Joysticks
+ld a,0
+ld (creg),a		; C = 0 = Read Joy0
+ld c,032h
+ld de,BIOSPB
+call BDOS	
+
+push af
+call iputs
+db 'Joy0: ',0
+pop af
+ld a,l
+call hex_a
+call iputs
+db 0dh,0ah,0
+
+ld a,2
+ld (breg),a		; B = 2 = Joysticks
+ld a,1
+ld (creg),a		; C = 1 = Read Joy0
+ld c,032h
+ld de,BIOSPB
+call BDOS	
+push af
+call iputs
+db 01Bh,'=',36,35,0	; This should set cursor to 3,3
+
+call iputs
+db 'Joy1: ',0
+pop af
+call hex_a
+call iputs
+db 0dh,0ah,0
+
+ld a,2
+ld (breg),a		; B = 2 = Joysticks
+ld a,2
+ld (creg),a		; C = 2 = Read both
+ld c,032h
+ld de,BIOSPB
+call BDOS	
+push hl
+call iputs
+db 01Bh,'=',37,35,0	; This should set cursor to 3,3
+
+call iputs
+db 'Joys: ',0
+pop hl
+ld a,h
+push hl
+call hex_a
+call iputs
+db ' ',0
+pop hl
+ld a,l
+call hex_a
+call iputs
+db 0dh,0ah,0
+
+ld c,06h		; BDOS function 6 = Direct Console I/O
+ld e,0FEh		; E = 0xFE = get status
+call BDOS		; returns A=0 if no char
+or a
+jp z,start		; Loop if no key, else exit
+
+ret
+
+
+
+hex_a:
+	push	af
+	srl	a
+	srl	a
+	srl	a
+	srl	a
+	call	.hexdump_nib
+	pop	af
+	push	af
+	and	00fh
+	call	.hexdump_nib
+	pop	af
+	ret
+
+.hexdump_nib:
+	add	'0'
+	cp	'9'+1
+	jp	m,.hexdump_num
+	add	'A'-'9'-1
+.hexdump_num:
+	ld c,2
+	ld	e,a
+	jp	BDOS	   ; tail
+	
+
+iputs:
+    ex (sp),hl                 ; hl = @ of string to print
+	call .puts_loop
+    inc hl                      ; point past the end of the string
+    ex (sp),hl
+    ret
+
+.puts_loop:
+    ld a,(hl)                  ; get the next byte to send
+    or a
+    jr z,.puts_done             ; if A is zero, return
+    ld e,a
+	ld c,2
+	push hl
+    call 5
+	pop hl
+    inc hl                      ; point to next byte to write
+    jp .puts_loop
+.puts_done:
+    ret
+
+end

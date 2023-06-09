@@ -1,13 +1,18 @@
 ; USER function for CP/M 3 BIOS
 .sysdebug 	equ 0
 .vdpdebug 	equ 0
+.joydebug	equ 1
 VDP			equ 1
 VDP_font 	equ 0
 cr			equ	0dh		; carriage return
 lf			equ	0ah		; line feed
+joyport0	equ	0a8h	; I/O port for joystick 0
+joyport1	equ	0a9h	; I/O port for joystick 1
 
-extrn	setbank,iputs,hexdump_a
-extrn	@cbnk,@MXTPA
+
+	extrn	setbank,iputs,hexdump_a
+	extrn	@cbnk,@MXTPA
+	extrn 	curs0,curs1,isrflags
 
 CSEG
 
@@ -23,10 +28,8 @@ tickr1:
 
 public joy0,joy1
 
-joy0:
-	db 0h
-joy1:
-	db 0h
+joy0:	db 0h
+joy1:	db 0h
 	
 ; Calling convention:
 ;
@@ -85,12 +88,13 @@ joy1:
 
 ;	B = 2 = Joysticks
 ;		C = 0 = Read joy_0
+;			Returns value in A
 ;		C = 1 = Read joy_1
+;			Returns value in A
 ;		C = 2 = Read Both
+;			Returns values in H:L
 ;		C = 3 = Enable/disable autopolling
-;			DE= Adress of byte buffer for joy 0
-;			HL= Adress of byte buffer for joy 1
-;				Set to 0 to disable
+;			D = Bits 0 + 1 = Joy0/1
 
 public usrfunc
 		
@@ -144,7 +148,73 @@ endif
 	jp z,.joy_1	; C == 1
 	dec a
 	jp z,.joys	; C == 2
+	dec a
+	jp z,.joypoll	; C == 3
 	ret
+
+; Idea: Timer based autopolling.
+; 	If enabled, read the joystick ports in the timer ISR
+;	This ticks at 152.5 Hz, every second tick ~76 Hz.
+;	Half frequency would be easy to implement, and save I/O within the ISR.
+; 	
+; Secondary idea: Timer callback function
+;	User program supplies a memory address to be called on each/each other tick
+;	The code at that address must return with RET, not RETI. It should also be kept as short/fast as possible.
+
+.joypoll:
+	; enable autopolling
+	ld a,d
+	and 03h			; mask out all but the last 2 bits
+	ld d,a
+	ld a,(isrflags)
+	and 0Ch			; mask away the 2 bits
+	or d			; and or in the new ones
+	ld (isrflags),a
+	ld hl,joy0		; return the buffer address 
+	ld de,joy0
+	ld bc,joy0
+if .joydebug
+	push hl
+	call iputs
+	db 	'JOY ADR ',cr,lf,0
+	pop hl
+	ld a,h
+	push hl
+	call hexdump_a
+	pop hl
+	ld a,l
+	call hexdump_a
+	call iputs
+	db 0dh,0ah,0
+endif
+	ret
+
+.joys:
+	; read both joysticks
+	in a,(joyport0)
+	ld (joy0),a
+	ld h,a
+	in a,(joyport1)
+	ld (joy1),a
+	ld l,a
+	ret
+
+.joy_0:
+	; read joystick 0
+	in a,(joyport0)
+	ld (joy0),a
+	ld e,a
+	ld h,a
+	ld l,a
+	ret
+	
+.joy_1:
+	; read joystick 1
+	in a,(joyport1)
+	ld (joy1),a
+	ld e,a
+	ret
+
 
 if VDP
 .vdp_col:
@@ -244,30 +314,6 @@ endif
 endif
 
 
-; Idea: Timer based autopolling.
-; 	If enabled, read the joystick ports in the timer ISR
-;	This ticks at 152.5 Hz, every second tick ~76 Hz.
-;	Half frequency would be easy to implement, and save I/O within the ISR.
-; 	
-; Secondary idea: Timer callback function
-;	User program supplies a memory address to be called on each/each other tick
-;	The code at that address must return with RET, not RETI. It should also be kept as short/fast as possible.
-
-.joypoll:
-	; enable autopolling
-	ret
-
-.joys:
-	; read both joysticks
-	ret
-
-.joy_0:
-	; read joystick 0
-	ret
-	
-.joy_1:
-	; read joystick 1
-	ret
 	
 	
 ; Assumption: The memory below the BDOS should be free/invalid while saving/loading the CCP

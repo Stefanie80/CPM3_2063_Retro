@@ -1,0 +1,8 @@
+r Tools\joys.z80
+r Tools\joypoll.z80
+zmac joys
+zmac joypoll
+link joys
+link joypoll
+w joys.com
+w joypoll.com

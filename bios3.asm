@@ -34,8 +34,18 @@ RTC_debug	equ 0
 	extrn @adrv,@rdrv,@trk,@sect	; parameters for disk I/O
 	extrn @dma,@dbnk,@cnt,@cbnk
 
+; These are the dump routines from DUMP.ASM
+;##########################################################################
+
+
 	extrn disk_dump, dumpdpb, dumpdtbl, hexdmp
 	extrn hexdump_a, dumpdma, dump_regs, dumpivars
+
+; These are all the publics from USER.Z80
+;##########################################################################
+
+	extrn tickr0,tickr1,joy0,joy1
+
 
 
 cr			equ	0dh		; carriage return
@@ -114,6 +124,7 @@ CSEG
 	extrn hexdump_a, dumpdma, dump_regs, dumpivars
 
 	public setbank
+	public curs0,curs1
 	
 ; Z80 Retro Rev 3 IO port definitions
 
@@ -194,16 +205,14 @@ endif
 	db 	0			; table terminator
 					
 					
-extrn tickr0,tickr1
-extrn joy0,joy1
-
 public isrflags
 isrflags:
 	db 00h
 
 rtc_irq_handler:
-	ex af,af'	;'
-	exx
+	push af
+	push bc
+	push hl
 if RTC_debug > 0	
 	ld a,'.'
 	ld c,a
@@ -262,8 +271,9 @@ endif
 	call .tailcall
 		
 .isr_tail:		
-	exx
-	ex af,af'	;'
+	pop hl
+	pop bc
+	pop af
 	ei
 	reti
 
@@ -877,14 +887,12 @@ if VDP
 	ret
 
 .vdp_bs:
-	ld a,' '
-	ld c,a
+	ld c,' '
 	call vdp_char
 	ld a,(vdp_x)
 	dec a
 	ld (vdp_x),a
-	ld a,' '
-	ld c,a
+	ld c,' '
 	call vdp_char
 	ret
 
@@ -981,6 +989,10 @@ vdp_char:			; print char in C at coordinates in D:E
 	jp z,.term_xy
 	cp 'G'
 	jp z,.term_atr
+	;invalid control sequence
+	xor a
+	ld (vdp_state),a
+	ld (vdp_esc),a
 	ret
 	
 .term_xy:
@@ -1190,10 +1202,12 @@ vdp_esc:			db 0
 vdp_state:			db 0
 vdp_rev:			db 0
 cursor:				db '_'
-curs0:				db 0A0h	;'_'
+curs0:				db '_' ;0A0h for block
 curs1:				db ' '
 c_tick:				dw 0
-c_mode:				db 0
+c_mode:				db 1
+
+
 endif
 
 	end
