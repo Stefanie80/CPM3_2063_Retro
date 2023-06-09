@@ -11,6 +11,8 @@
 
 	maclib z80
 
+	DSEG
+	
 base	equ	$
 abase	equ	base-0100h
 
@@ -28,6 +30,7 @@ printbuf	equ	09	;print string
 open$func	equ	15	;open function
 read$func	equ	20	;read sequential
 setdma$func	equ	26	;set dma address
+public bdos
 ;
 ;	Loader Equates
 ;
@@ -37,34 +40,39 @@ bnktop	equ	abase+82h
 bnklen	equ	abase+83h
 osentry	equ	abase+84h
 
-	cseg
+	db	0
 
-	; The very first step must be, switch the bottom RAM bank to 0
-	mvi a,00fh
-	out	010h
-	; Now move ourselves from 0xC000 to 0x100
-	; We also don't need all 16k, but why not?
-	; All of this *should* fit below CPM
-	lxi d,0100h	; destination
-	lxi h,0C000h	; source
-	lxi b,02000h	; count = 8k
-	ldir
-	jmp 0115h
-	nop ; this is a NOP ramp 
-	nop	; it does nothing
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
+; Bios equates
+
+bios$pg		equ	$
+
+bootf		equ	bios$pg+00	; 00. cold boot
+conoutf		equ	bios$pg+12	; 04. console output function
+homef		equ	bios$pg+24	; 08. disk home function
+seldskf		equ	bios$pg+27	; 09. select disk function
+settrkf		equ	bios$pg+30	; 10. set track function
+setsecf		equ	bios$pg+33	; 11. set sector function
+setdmaf		equ	bios$pg+36	; 12. set dma function
+sectran		equ	bios$pg+48	; 16. sector translate
+movef		equ	bios$pg+75	; 25. memory move function
+readf		equ	bios$pg+39	; 13. read disk function
+move$out	equ	movef
+move$tpa	equ	movef
+
+	CSEG
 	
-begin:		; the linker should encode this jump point for a base of 0x1000
+
+	; The very first step must be:
+	;  LDIR 64k
+	ld	hl,0
+	ld	de,0
+	ld	bc,0;4000h
+	ldir				; Copy all the code in the FLASH into RAM at same address.
+
+	; Disable the FLASH and run from SRAM only from this point on.
+	in	a,(070h)	; Dummy-read this port to disable the FLASH.
+	
+begin:		
 
 	lxi	sp,stackbot
 
@@ -1576,25 +1584,8 @@ deblock$io:
 	call deblock10! inx h! inx h
 	lxi d,track! mvi c,4! jmp move
 
-	org	base+((($-base)+255) and 0ff00h)-1
-	db	0
+org	base+((($-base)+255) and 0ff00h)-1
 
-; Bios equates
+end
 
-bios$pg		equ	$
-
-bootf		equ	bios$pg+00	; 00. cold boot
-conoutf		equ	bios$pg+12	; 04. console output function
-homef		equ	bios$pg+24	; 08. disk home function
-seldskf		equ	bios$pg+27	; 09. select disk function
-settrkf		equ	bios$pg+30	; 10. set track function
-setsecf		equ	bios$pg+33	; 11. set sector function
-setdmaf		equ	bios$pg+36	; 12. set dma function
-sectran		equ	bios$pg+48	; 16. sector translate
-movef		equ	bios$pg+75	; 25. memory move function
-readf		equ	bios$pg+39	; 13. read disk function
-move$out	equ	movef
-move$tpa	equ	movef
-
-		end
 

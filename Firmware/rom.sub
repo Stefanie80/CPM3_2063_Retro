@@ -1,0 +1,18 @@
+r Loader\ldrbios.asm
+r Loader\cpmldr.asm
+r Loader\Lspi.asm
+r Loader\Lnocache.asm
+r Loader\Lsdcard.asm
+r fnt8x8.asm
+r z80bmp.asm
+
+rmac cpmldr.asm
+
+zmac ldrbios.asm
+zmac fnt8x8.asm
+zmac z80bmp.asm
+
+link loadr[L100]=cpmldr,ldrbios,fnt8x8,z80bmp
+era 2063.rom
+ren 2063.rom loadr.com
+w 2063.rom b

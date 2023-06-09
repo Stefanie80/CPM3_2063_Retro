@@ -62,7 +62,7 @@ spriteatr	equ 03B00h	; Sprite Attributes
 	ld d,8
 	ld e,3				; 3x8 loops
 	ld b,0	
-	ld a,0F1h
+	ld a,0F0h
 .color_loop:
 	out (vdp_vram),a
 	call .vdp_delay

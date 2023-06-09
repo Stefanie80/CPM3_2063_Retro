@@ -1,4 +1,5 @@
-font_8x8:
+public fnt8x8
+fnt8x8:
 db 000h,000h,000h,000h,000h,000h,000h,000h ; 000
 db 07Eh,081h,0A5h,081h,0BDh,099h,081h,07Eh ; 001
 db 07Eh,0FFh,0DBh,0FFh,0C3h,0E7h,0FFh,07Eh ; 002
@@ -255,3 +256,5 @@ db 07Ch,00Eh,03Ch,00Eh,07Ch,000h,000h,000h ; 0FC
 db 078h,00Ch,038h,060h,07Ch,000h,000h,000h ; 0FD
 db 000h,000h,03Ch,03Ch,03Ch,03Ch,000h,000h ; 0FE
 db 000h,000h,000h,000h,000h,000h,000h,000h ; 0FF
+
+end
