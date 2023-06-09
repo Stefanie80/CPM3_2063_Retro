@@ -7,4 +7,5 @@ CPM3.SYS
 *.SPR
 *.PRL
 *.REL
+*.ROM
 *.lib
