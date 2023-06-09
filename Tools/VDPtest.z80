@@ -1,6 +1,15 @@
+;##########################################
+; 
+; Test Utility and Skeleton Program
+;  for
+; TMS9118/9918 VDP
+;
+;##########################################
 
+; BDOS call Adress
 BDOS equ 5
 
+; Parameter Block for BDOS func 50 BIOS calls
 BIOSPB: 
 func:	db 30	; BIOS function no.
 areg: 	db 0 	; A register contents
@@ -9,12 +18,22 @@ breg: 	db 0 	; BC register contents
 dereg:	dw 0 	; DE register contents
 hlreg:	dw 0 	; HL register contents
 
+; Non-Printable Characters
 cr			equ	0dh		; carriage return
 lf			equ	0ah		; line feed
+
+; IO Adresses
 joyport0	equ	0a8h	; I/O port for joystick 0
 joyport1	equ	0a9h	; I/O port for joystick 1
 vdp_vram	equ	080h	; VDP port for accessing the VRAM
 vdp_reg		equ	081h	; VDP port for accessing the registers
+
+; VRAM Adresses for Graphics Mode 2
+nametbl		equ 03800h	; Name Table
+patterntbl	equ 00000h	; Pattern Table
+colortbl	equ 02000h	; Color Table
+spritetbl	equ 01800h	; Sprite Patterns
+spriteatr	equ 03B00h	; Sprite Attributes
 
 	ORG 0100h
 	CSEG
@@ -32,34 +51,46 @@ vdp_reg		equ	081h	; VDP port for accessing the registers
 	ret
 	
 .load_colors:
-	ld a,00h
+	ld hl,colortbl
+	ld a,l
 	out (vdp_reg),a		; VRAM adr low byte
 	call .vdp_delay
-	ld a,060h
+	ld a,h
+	or 040h				; VRAM Write
 	out (vdp_reg),a		; VRAM adr high byte & write flag
-	call .vdp_delay
-	ld c,3				; 3 loops
-	ld b,0
-	ld a,0F1h			; start at 0
+	call .vdp_delay	
+	ld d,8
+	ld e,3				; 3x8 loops
+	ld b,0	
+	ld a,0F1h
 .color_loop:
 	out (vdp_vram),a
 	call .vdp_delay
 	inc b
 	jr nz,.color_loop
-	dec c
+	dec d
+	jr nz,.color_loop
+	ld d,8
+	sub 020h
+	dec e
 	jr nz,.color_loop
 	ret
 	
 .fill_screen:
-	ld a,00h
+	ld hl,nametbl
+	ld a,l
 	out (vdp_reg),a		; VRAM adr high byte
 	call .vdp_delay
-	ld a,078h
+	ld a,h
+	or 040h				; VRAM Write
 	out (vdp_reg),a		; VRAM adr low byte & write flag
 	call .vdp_delay
 	ld c,3				; 3 loops
+	ld b,0
 	xor a				; start at 0
 .fill_loop:
+	;ld a,c
+	;add a,'0'
 	out (vdp_vram),a
 	call .vdp_delay
 	inc a
@@ -84,11 +115,12 @@ vdp_reg		equ	081h	; VDP port for accessing the registers
 	ret
 
 .vdp_ldfnt:
-	; Set the VRAM write address to 0
-	ld	a,0				; LSB
+	ld hl,patterntbl
+	ld	a,l				; LSB
 	out	(vdp_reg),a
 	call .vdp_delay
-	ld	a,040h			; MSB
+	ld a,h
+	or 040h				; VRAM Write
 	out	(vdp_reg),a
 	ld	c,vdp_vram		; the I/O port number
 	ld d,3
