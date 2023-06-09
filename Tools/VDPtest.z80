@@ -29,10 +29,10 @@ vdp_vram	equ	080h	; VDP port for accessing the VRAM
 vdp_reg		equ	081h	; VDP port for accessing the registers
 
 ; VRAM Adresses for Graphics Mode 2
-nametbl		equ 03800h	; Name Table
 patterntbl	equ 00000h	; Pattern Table
-colortbl	equ 02000h	; Color Table
 spritetbl	equ 01800h	; Sprite Patterns
+colortbl	equ 02000h	; Color Table
+nametbl		equ 03800h	; Name Table
 spriteatr	equ 03B00h	; Sprite Attributes
 
 	ORG 0100h

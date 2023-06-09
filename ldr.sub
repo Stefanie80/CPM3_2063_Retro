@@ -1,7 +1,7 @@
-r ldrbios.asm
+r Loader\ldrbios.asm
 zmac ldrbios.asm
 
-r cpmldr.asm
+r Loader\cpmldr.asm
 rmac cpmldr.asm
 
 link loadr[L100]=cpmldr,ldrbios
