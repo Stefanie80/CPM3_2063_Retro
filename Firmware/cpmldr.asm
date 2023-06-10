@@ -66,7 +66,7 @@ move$tpa	equ	movef
 	;  LDIR 64k
 	ld	hl,0
 	ld	de,0
-	ld	bc,0;4000h
+	ld	bc,04000h
 	ldir				; Copy all the code in the FLASH into RAM at same address.
 
 	; Disable the FLASH and run from SRAM only from this point on.

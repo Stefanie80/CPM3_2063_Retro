@@ -5,13 +5,13 @@
 ; Refactored for CP/M 3 by SolderGirl
 ;
 ;##########################################################################
-
+org 0
 .debug:			equ	1
 .debug_vdp:		equ 1
 .debugger:		equ 0	; have some options disabled for running inside DDTZ
 
 
-EXTRN @MXTPA
+;EXTRN @MXTPA
 
 	cr			equ	0dh	; carriage return
 	lf			equ	0ah	; line feed
@@ -25,41 +25,6 @@ EXTRN @MXTPA
 ; This is the jump table for CPMLDR. It needs to have all the jump points to 
 ; maintain the structure as specified in the CP/M 3 System Guide
 cseg
-
-BOOT:   JP      .bios_boot      ;0 JMP BOOT Perform cold start initialization
-WBOOT:  JP      .bios_wboot     ;1 JMP WBOOT Perform warm start initialization
-CONST:  JP      .dummy     		;2 JMP CONST Check for console input character ready
-CONIN:  JP      .dummy     		;3 JMP CONIN Read Console Character in
-CONOUT: JP      .bios_conout    ;4 JMP CONOUT Write Console Character out
-LIST:   JP      .dummy      	;5 JMP LIST Write List Character out
-PUNCH:  JP      .dummy     		;6 JMP AUXOUT Write Auxiliary Output Character
-READER: JP      .dummy    		;7 JMP AUXIN Read Auxiliary Input Character
-HOME:   JP      .bios_home      ;8 JMP HOME Move to Track 00 on Selected Disk
-SELDSK: JP      .bios_seldsk    ;9 JMP SELDSK Select Disk Drive
-SETTRK: JP      .bios_settrk    ;10 JMP SETTRK Set Track Number
-SETSEC: JP      .bios_setsec    ;11 JMP SETSEC Set Sector Number
-SETDMA: JP      .bios_setdma    ;12 JMP SETDMA Set DMA Address
-READ:   JP      nc_read       ;13 JMP READ Read Specified Sector
-WRITE:  JP      .dummy      	;14 JMP WRITE Write Specified Sector
-PRSTAT: JP      .dummy    		;15 JMP LISTST Return List Status
-SECTRN: JP      .bios_sectrn    ;16 JMP SECTRN Translate Logical to Physical Sector
-CONOST: JP		.dummy			;17 JMP CONOST Return Output Status of Console
-AUXIST:	JP		.dummy			;18 JMP AUXIST Return Input Status of Aux. Port
-AUXOST:	JP		.dummy			;19 JMP AUXOST Return Output Status of Aux. Port
-DEVTBL:	JP		.dummy			;20 JMP DEVTBL Return Address of Char. I/O Table
-DEVINI:	JP		.dummy			;21 JMP DEVINI Initialize Char. I/O Devices
-DRVTBL:	JP		.dummy			;22 JMP DRVTBL Return Address of Disk Drive Table
-MULTIO:	JP		.dummy			;23 JMP MULTIO Set Number of Logically Consecutive sectors to be read or written
-FLUSH:	JP		.dummy			;24 JMP FLUSH Force Physical Buffer Flushing for user-supported deblocking
-MOVE:	JP		.dummy			;25 JMP MOVE Memory to Memory Move
-TIME:	JP		.dummy			;26 JMP TIME Time Set/Get signal
-SELMEM:	JP		.dummy			;27 JMP SELMEM Select Bank of memory
-SETBNK:	JP		.dummy			;28 JMP SETBNK Specify Bank for DMA Operation
-XMOVE:	JP		.dummy			;29 JMP XMOVE Set Bank When a Buffer is in a Bank other than 0 or 1
-USERF:	JP		.dummy			
-RES1:	JP		.dummy
-RES2:	JP		.dummy
-
 
 gpio_in				equ 00h		; GP input port
 gpio_out			equ	10h		; GP output port
@@ -88,13 +53,9 @@ spriteatr	equ 03B00h	; Sprite Attributes
 ;##########################################################################
 ; Libraries
 ;##########################################################################
-include Lsdcard.asm
-include Lspi.asm
-include Lnocache.asm
 
 	extrn 	fnt8x8
-	extrn 	chrW,chrH
-	extrrn 	z80bmp
+	extrn 	chrW,chrH,z80bmp,bmpH
 	
 ;##########################################################################
 ;
@@ -129,7 +90,7 @@ include Lnocache.asm
 ;
 ;##########################################################################
 
-extrn bdos	
+;extrn bdos	
 ; only following functions are supported:
 ;	13	reset disk system
 ;	09	print string
@@ -137,27 +98,84 @@ extrn bdos
 ;	20	read sequential
 ;	26	set dma address
 
+	; The very first step must be:
+	;  LDIR 64k
+	ld	hl,0
+	ld	de,0
+	ld	bc,0;4000h
+	ldir				; Copy all the code in the FLASH into RAM at same address.
+	; Disable the FLASH and run from SRAM only from this point on.
+	in	a,(070h)	; Dummy-read this port to disable the FLASH.
+
 .bios_boot:
 	; This will select low-bank 0, idle the SD card, and idle the printer
 	ld	a,0fh + (.low_bank<<4)
 	ld	(gpio_out_cache),a
 	out	(gpio_out),a
 	; make sure we have a viable stack
-	;ld	sp,bios_stack		; use the private BIOS stack to get started
+	ld	sp,bios_stack		; use the private BIOS stack to get started
 	
 	call .init_console		; Init CTC & SIO
 if .debug > 0
 	call	iputs
-	db	cr,lf,'LDRBIOS: BOOT',cr, lf, 0
-	db	cr,lf,'         Debug level 0x'0
+	db	cr,lf,'BOOT',cr, lf, 0
+	call	iputs
+	db	cr,lf,'Debug level 0x'0
 	ld	a,.debug		; A = the current debug level
 	call	hexdump_a		; print the current level number
 	call	puts_crlf		; and a newline
 endif
-	call .vdp_init			; Init VDP
-	call .vdp_ldfnt			; Load ANSI 8x8 Font
-	call .vdp_ldcol			; Init Color Table
-	call .clear_screen		; Clear Nametable
+	call vdp_init			; Init VDP
+if .debug > 0
+	call	iputs
+	db	 'V ', 0
+endif
+	call vdp_ldfnt			; Load ANSI 8x8 Font
+if .debug > 0
+	call	iputs
+	db	 'F ', 0
+endif
+	call vdp_ldcol			; Init Color Table
+if .debug > 0
+	call	iputs
+	db	 'C ', 0
+endif
+	call loadlogo
+if .debug > 0
+	call	iputs
+	db	 'P ',0
+endif
+	call clear_screen		; Clear Nametable
+	
+	ld de,0020Bh
+	ld hl,strng
+	
+	call vdp_string			
+	call .colorize
+	
+	call	iputs
+	db 'done',cr,lf,0
+
+	jp $ ; spin in place for debug
+
+strng: 
+	db 'Z80 Retro!',0
+
+vdp_string:
+	ld a,(hl)
+	or a
+	ret z
+	ld a,(hl)
+	ld c,a
+	push de
+	push hl
+	call vdp_char	; print char in C at coordinates in D:E
+	pop hl
+	pop de
+	inc e
+	inc hl
+	jr vdp_string
+
 	; At this point, the VDP should be in Mode 2 with ANSI Font loaded
 	; Lets display a logo in the upper 3rd of the screen
 	
@@ -173,8 +191,6 @@ endif
 
 
 	; Display a hello world message.
-	ld	hl,.boot_msg
-	call	puts
 
 
 if .debug >= 3
@@ -185,20 +201,6 @@ if .debug >= 3
 	call	hexdump
 endif
 	ret
-
-;##########################################################################
-; BIOS Function 1: WBOOT
-; Get Control When a Warm Start Occurs
-; Entry Parameters: None
-; Returned Values: None
-;##########################################################################
-; We are inside the bootloader, all of that is done elswhere
-.bios_wboot:
-
-if .debug > 0
-	call	iputs
-	db	cr,lf,'LDRBIOS: WBOOT',cr,lf,0
-endif
 
 if .debug >= 3
 	; dump the zero-page for reference
@@ -218,7 +220,7 @@ endif
 ;Returned Values: None
 ;Send the character in register C to the console output device. The character is in ASCII with no parity.
 ;##########################################################################
-.bios_conout:
+
 con_tx_char:
 sioa_tx_char:
 	call	sioa_tx_ready
@@ -383,30 +385,17 @@ endif
 	ld	l,c
 	ret
 
-.boot_msg:
-	defb	cr,lf
-	;defb	'................................'
-	defb	':        Z80 Retro BIOS        :',cr,lf
-	defb	':     (C) 2021 John Winans     :',cr,lf
-	defb	':..............................:',cr,lf
-	defb	cr,lf,0
-
 ;##########################################################################
 ; Initialize the console port.  Note that this includes CTC port 1.
 ;##########################################################################
 .init_console:
 	; Init CTC first
-	;ld	c,6			; C = 6 = 19200 bps
-	
 	ld	c,12			; C = 12 = 9600 bpst
     ld      a,047h      ; TC follows, Counter, Control, Reset
     out     (ctc_1),a
     ld      a,c
     out     (ctc_1),a
-
-	;call	init_ctc_1		; start CTC1 in case J11-A selects it!
 	; just initialize SIO A.
-	
 	ld	c,sio_ac	; port to write into (port A control)
 	ld	hl,.sio_init_wr	; point to init string
 	ld	b,.sio_init_len_wr ; number of bytes to send
@@ -448,7 +437,7 @@ puts:
         or      a
         jr      z,.puts_done             ; if A is zero, return
         ld      c,a
-        call    .bios_conout
+        call    con_tx_char
         inc     hl                      ; point to next byte to write
         jp      .puts_loop
 .puts_done:
@@ -527,6 +516,7 @@ bios_stack:			db 0
 	ds	(4087/8)+1,0aah	; scratchpad used by BDOS for disk allocation info
 .bios_alv_a_end:
 
+	CSEG
 ;##############################################################
 ; Print a CRLF
 ; Clobbers AF, C
@@ -535,13 +525,6 @@ puts_crlf:
         call    iputs
         db    cr,lf,0 	;'wtf \r\n\0'
         ret
-
-.vdp_del:
-	push hl
-	pop hl
-	push hl
-	pop hl
-	ret
 
 vdp_init:
 if .debug_vdp > 0
@@ -562,11 +545,11 @@ endif
 	out	(vdp_reg),a
 	ret
 	
-.vdp_ldfnt:
+vdp_ldfnt:
 	ld hl,patterntbl
 	ld	a,l				; LSB
 	out	(vdp_reg),a
-	call .vdp_delay
+	call .vdp_del
 	ld a,h
 	or 040h				; VRAM Write
 	out	(vdp_reg),a
@@ -577,7 +560,7 @@ endif
 	ld	de,2048			; number of bytes to send
 	ld hl,fnt8x8
 .ldfnt_loop:
-	call .vdp_delay
+	call .vdp_del
 	outi				; note: this clobbers B
 	dec	de
 	ld	a,d
@@ -586,24 +569,185 @@ endif
 	pop de
 	dec d
 	jr nz,.ldfnt_l
+	call .savechrs		; chain
 	ret
 
-.vdp_ldcol:
-	ld hl,colortbl
-	ld a,l
-	out (vdp_reg),a		; VRAM adr low byte
-	call .vdp_delay
+;##################################
+; Load bitmap pattern
+;##################################
+.vram_adr:
+	ld	a,l				; LSB
+	out	(vdp_reg),a
+	call .vdp_del
 	ld a,h
 	or 040h				; VRAM Write
-	out (vdp_reg),a		; VRAM adr high byte & write flag
-	call .vdp_delay	
+	out	(vdp_reg),a
+	call .vdp_del
+	ret
+	
+
+loadlogo:
+	; dest=VRAM(patterntbl+(8 * (.clobber+128)))
+	ld hl,(.clobber)
+	ld de,128
+	add hl,de			
+	ex de,hl			; DE = (.clobber) + 128
+
+	ld hl,patterntbl
+	ld b,8				; 8 Bytes / Pattern
+.ladd:
+	add hl,de
+	dec b
+	jr nz,.ladd
+	call .vram_adr
+	ld	c,vdp_vram		; the I/O port number
+	ld hl,z80bmp
+	ld a,9;(chrW)
+	ld d,a			; 9 chrs / line
+	ld a,64;(bmpH)
+	ld e,a			; 8 lines * 8 bytes/char
+	; src=z80bmp, len=chrW x bmpH
+.lbyte:
+	outi ;C=port,B=count,HL=src
+	call .vdp_del
+	dec d
+	jr nz,.lbyte
+	ld a,9;(chrW)
+	ld d,a			; 9 chrs / line
+	dec e
+	jr nz,.lbyte
+
+	; Pattern Data loaded,
+	; Now load the Name table (iscreen)
+	ld hl,28
+	ld de,128
+	add hl,de			
+	ld a,e
+	push af			; first pattern no.
+	; 9 per line x 8 lines
+	ld hl,iscreen	; destination
+	ld a,9 ;(chrW)
+	ld d,a			; 9 chrs / line
+	ld a,8;(chrH)
+	ld e,a			; 8 lines 
+	pop af
+	ld a,156
+.namloop:
+	ld (hl),a
+	inc hl
+	inc a
+	dec d
+	jr nz,.namloop	; one line done
+	push af
+	ld a,9;(chrW)
+	ld d,a			; 9 chrs / line
+	pop af
+	push de
+	ld de,23		; skip 23 chrs
+	add hl,de
+	pop de
+	dec e
+	jr nz,.namloop	; next line
+	;jp .colorize
+	ret
+	
+	; nametable loaded, now colors
+.colorize:
+	; Cols A,1 but A,4 for '80'
+	ld hl,02000h	;colortbl
+	call .vram_adr
+	;ld d,9			; 9 chrs / line
+	
+	ld e,8			; 8 lines 
+	ld a,0A3h
+	ld d,72			; 8 bytes/char
+.cllop:
+	ld a,0A3h
+	out (vdp_vram),a
+	call .vdp_del
+	dec d
+	jr nz,.cllop	; one line done
+	inc h
+	call .vram_adr
+	ld d,72			; 9 chrs / line
+	dec e
+	jr nz,.cllop	; next line
+	
+ret
+
+;##################################
+; Save a set of characters 
+; Before loading different patterns
+;##################################
+	DSEG
+.keepchrs:	; Save some graphic characters
+; 128 = 0x80
+db 0B9h,0BAh,0BBh,0BCh,0C8h,0C9h,0CAh,0CBh
+db 0CCh,0CDh,0CEh,0B0h,0B1h,0B2h,0AEh,0AFh
+db 0B3h,0B4h,0C0h,0C1h,0C2h,0C3h,0C4h,0C5h
+db 0D9h,0DAh,0BFh,0 
+.clobber:	dw $-.keepchrs	; First char to clobber
+	CSEG
+
+.savechrs:
+	; dest=VRAM(patterntbl+128)
+	ld hl,patterntbl
+	ld de,128
+	ld b,8
+.patadd:
+	add hl,de
+	dec b
+	jr nz,.patadd
+	
+	ld	a,l				; LSB
+	out	(vdp_reg),a
+	call .vdp_del
+	ld a,h
+	or 040h				; VRAM Write
+	out	(vdp_reg),a
+	call .vdp_del
+	ld	c,vdp_vram		; the I/O port number
+	; source=fnt8x8+(keepchr*8)
+	ld hl,.keepchrs
+	
+.perchar:
+	ld a,(hl)
+	cp 0
+	ret z	; all done
+	push hl
+	; A=chr
+	ld hl,fnt8x8
+	ld de,0
+	ld e,a
+	ld b,8
+	add hl,de
+	dec b
+.chradd:
+	adc hl,de
+	dec b
+	jr nz,.chradd
+	; HL->source
+	ld b,8
+.perbyte:
+	outi ;C=port,B=count,HL=src
+	call .vdp_del
+	jr nz,.perbyte
+	; next character
+	pop hl
+	inc hl
+	jr .perchar
+	ret
+
+vdp_ldcol:
+	ld hl,colortbl
+	call .vram_adr
 	ld d,8
 	ld e,3				; 3x8 loops
 	ld b,0	
 	ld a,0F1h			; White on Black (?)Backdrop(?)
 .color_loop:
 	out (vdp_vram),a
-	call .vdp_delay
+	call .vdp_del
 	inc b
 	jr nz,.color_loop
 	dec d
@@ -613,27 +757,85 @@ endif
 	jr nz,.color_loop
 	ret
 
-.clear_screen:
+clear_screen:
 	ld hl,nametbl
-	ld a,l
-	out (vdp_reg),a		; VRAM adr high byte
-	call .vdp_delay
-	ld a,h
-	or 040h				; VRAM Write
-	out (vdp_reg),a		; VRAM adr low byte & write flag
-	call .vdp_delay
-	ld c,3				; 3 loops
-	ld b,0
-	xor a				; start at 0
+	call .vram_adr
+	;ld de,(screenlen)	
+	ld de,768			; bytes to write
+	ld hl,iscreen		; screenbuffer
+	ld c,vdp_vram
 .fill_loop:
-	out (vdp_vram),a
-	call .vdp_delay
-	inc a
-	jr nz,.fill_loop
-	dec c
-	jr nz,.fill_loop
+	outi
+	call .vdp_del
+	dec	de
+	ld	a,d
+	or	e
+	jr	nz,.fill_loop
 	ret
 
+.vdp_del:
+	push hl
+	pop hl
+	push hl
+	pop hl
+	ret
+
+;#############################################################################
+; Print the value in A in hex
+; Clobbers C
+;#############################################################################
+hexdump_a:
+	push	af
+	srl	a
+	srl	a
+	srl	a
+	srl	a
+	call	.hexdump_nib
+	pop	af
+	push	af
+	and	00fh
+	call	.hexdump_nib
+	pop	af
+	ret
+
+.hexdump_nib:
+	add	'0'
+	cp	'9'+1
+	jp	m,.hexdump_num
+	add	'A'-'9'-1
+.hexdump_num:
+	ld	c,a
+	jp	con_tx_char	   ; tail
+
+vdp_char:			; print char in C at coordinates in D:E
+	push bc			; save character
+	ld hl,0			; clear HL
+	ld l,e			
+	ld c,d
+	ld de,0			; clear DE
+	ld a,32
+	ld e,a
+.addloop0:
+	add hl,de
+	dec c
+	jp m,.noadd
+	jr nz,.addloop0
+.noadd:	
+	ld de,nametbl ; 0800h		; offset for VRAM
+	
+	add hl,de
+
+	ld a,l
+	out (vdp_reg),a
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	pop bc
+	ld a,c
+	out (vdp_vram),a	; Write to the VDP
+	ret
+
+DSEG
 
 .vdpinit:
 			db	00000010b,080h	; R0 = Graphics II, no EXT video
@@ -646,6 +848,62 @@ endif
 .vdpcol:	db	00000100b,087h	; R7 = Dark Blue Backdrop
 .vdpinit_len: equ	$-.vdpinit	; number of bytes to write
 
-vdp_vram			equ	080h	; VDP port for accessing the VRAM
-vdp_reg				equ	081h	; VDP port for accessing the registers
+iscreen:	; 3 blocks x 8 lines x 32 chars
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,085h,089h,089h,089h,089h,089h,089h
+db 089h,089h,089h,089h,089h,089h,089h,089h,089h,089h,089h,089h,089h,089h,089h,082h
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,081h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,081h
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,081h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,081h
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,081h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,081h
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,081h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,081h
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,081h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,081h
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,081h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,081h
+db 000h,001h,002h,003h,004h,005h,006h,007h,008h,081h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,081h
 
+db 0C9h,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CAh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh
+db 0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0B9h
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0BAh,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0BAh
+db 0C8h,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh
+db 0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0CDh,0BCh
+screenlen: dw	$-iscreen	; number of bytes to write
+
+CSEG 
+include Lsdcard.asm
+include Lspi.asm
+include Lnocache.asm
+
+end
