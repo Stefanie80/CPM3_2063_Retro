@@ -85,6 +85,7 @@ joy1:	db 0h
 ;		C = 5 = Get/Set Colors
 ;			D = 0=get 1=set
 ;			E = FG:BG color code, 4 bit each
+;		C = 6 = Clear the screen
 
 ;	B = 2 = Joysticks
 ;		C = 0 = Read joy_0
@@ -137,6 +138,8 @@ if VDP
 	jp z,.vdp_cv	; C == 4
 	dec a
 	jp z,.vdp_col	; C == 5
+	dec a
+	jp z,.vdp_cls	; C == 6
 endif
 	ret
 	
@@ -217,6 +220,26 @@ endif
 
 
 if VDP
+
+.vdp_cls:
+	ld hl,0800h		; offset for VRAM
+	ld a,l
+	out (vdp_reg),a
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	ld b,80
+	ld c,24
+	ld a,' '
+.cls:	
+	out (vdp_vram),a	; Write to the VDP
+	call .vdp_delay
+	dec b
+	jr nz,.cls
+	dec c
+	jr nz,.cls
+
+
 .vdp_col:
 	ld a,d
 	or a				

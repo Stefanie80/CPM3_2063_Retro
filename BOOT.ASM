@@ -111,7 +111,7 @@ no$CCP:			; here if we couldn't find the file
 
 	lxi b,0101h					; B=1=vdp,C=1=Init
 	call usrfunc
-
+	
 	lxi b,0000h					; B=0=sys,C=0=RW block
 	lxi d,00E3h					; D=0=read, block number E3 (font with inverted upper chars)
 	call usrfunc

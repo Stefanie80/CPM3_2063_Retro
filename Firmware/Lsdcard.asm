@@ -56,9 +56,9 @@
 ;############################################################################
 
 
-.sd_debug: equ 0
+;.sd_debug: equ 0
 
-;.sd_debug: equ 1
+.sd_debug: equ 1
 
 ;	equates for non graphic characters
 ;
@@ -213,7 +213,7 @@ if .sd_debug
 	ld	hl,.sd_cmd0_buf
 	ld	bc,.sd_cmd0_len
 	ld	e,0
-	call	hexdump
+	call	hexdmp
 	call	iputs
 	db	'  R1: ',0
 	pop	af
@@ -261,13 +261,13 @@ if .sd_debug
 	ld	hl,.sd_cmd8_buf
 	ld	bc,.sd_cmd8_len
 	ld	e,0
-	call	hexdump
+	call	hexdmp
 	call	iputs
 	db	'  R7: ',0
 	pop	hl			; POP buffer address
 	ld	bc,5
 	ld	e,0
-	call	hexdump			; dump the reply message
+	call	hexdmp			; dump the reply message
 endif
 
 	ret
@@ -298,13 +298,13 @@ if .sd_debug
 	ld	hl,.sd_cmd58_buf
 	ld	bc,.sd_cmd58_len
 	ld	e,0
-	call	hexdump
+	call	hexdmp
 	call	iputs
 	db	'  R3: ',0
 	pop	hl			; POP buffer address
 	ld	bc,5
 	ld	e,0
-	call	hexdump			; dump the reply message
+	call	hexdmp			; dump the reply message
 endif
 
 	ret
@@ -332,7 +332,7 @@ if .sd_debug
 	ld	hl,.sd_cmd55_buf
 	ld	bc,.sd_cmd55_len
 	ld	e,0
-	call	hexdump
+	call	hexdmp
 	call	iputs
 	db	'  R1: ',0
 	pop	af
@@ -372,7 +372,7 @@ if .sd_debug
 	ld	hl,.sd_acmd41_buf
 	ld	bc,.sd_acmd41_len
 	ld	e,0
-	call	hexdump
+	call	hexdmp
 	call	iputs
 	db	'   R1: ',0
 	pop	af
@@ -501,7 +501,7 @@ if .sd_debug_cmd17
 	pop	hl			; HL = IY = cmd_buffer address
 	ld	bc,6			; B = command buffer length
 	ld	e,0
-	call	hexdump
+	call	hexdmp
 
 	; print the target address
 	call	iputs

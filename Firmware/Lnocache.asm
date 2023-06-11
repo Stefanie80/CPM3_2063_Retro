@@ -31,12 +31,12 @@
 ;##########################################################################
 
 
-.rw_debug:		equ	0
+.rw_debug:		equ	2
 
 
 ; XXX This is a hack that won't work unless the disk partition < 0x10000
 ; XXX This has the SD card partition offset hardcoded in it!!!
-.sd_partition_base: equ	800h
+.sd_partition_base: equ	0;800h
 
 
 ; declaratios for the SCB
@@ -189,7 +189,72 @@ nc_init:
 
 	ld	a,1
 	ld	(.bios_sdbuf_val),a     ; mark .bios_sdbuf_trk as invalid
+	call sd_boot
+	call sd_cmd0
+	cp 1
+	jr z,.init1
+	;Error
+	ld a,080h
+	jp .sd_err
+
+.init1:	
+	ld de,.bios_sdbuf
+	call sd_cmd8
+	ld a,(.bios_sdbuf)
+	cp 1
+	jr z,.init2
+	;Error
+	ld a,081h
+	jp .sd_err
+
+.init2:	
+	ld	b,128			; max retry
+.ac41_loop:
+	push	bc			; save BC since B contains the retry count 
+	ld	de,.bios_sdbuf		; store command response into LOAD_BASE
+	call	sd_acmd41		; ask if the card is ready
+	pop	bc			; restore our retry counter
+	or	a			; check to see if A is zero
+	jr	z,.ac41_done		; is A is zero, then the card is ready
+
+	; Card is not ready, waste some time before trying again
+	ld	hl,01000h		; count to 0x1000 to consume time
+.ac41_dly:
+	dec	hl			; HL = HL -1
+	ld	a,h			; does HL == 0?
+	or	l
+	jr	nz,.ac41_dly		; if HL != 0 then keep counting
+	djnz	.ac41_loop		; if (--retries != 0) then try again
+	; Error
+	ld a,082h
+	jp .sd_err
+	
+.ac41_done:
+	ld de,.bios_sdbuf
+	call sd_cmd58
+	ld	a,(.bios_sdbuf+1)
+	and	040h			; CCS bit is here (See spec p275)
+	jr	nz,.initdone
+	; Error
+	ld a,083h
+.sd_err:
+	push af
+	call	iputs
+	db	'SDerr: ',0
+	ld	a,.debug		; A = the current debug level
+	pop af
+	call	hexdump_a		; print the current level number
+	call	puts_crlf		; and a newline
+
+.initdone:
     ret
+
+; - send at least 74 CLKs
+; - send CMD0 & expect reply message = 0x01 (enter SPI mode)
+; - send CMD8 (establish that the host uses Version 2.0 SD SPI protocol)
+; - send ACMD41 (finish bringing the SD card on line)
+; - send CMD58 to verify the card is SDHC/SDXC mode (512-byte block size)
+
 
 ;##########################################################################
 ; A debug routing for displaying the settings before a read or write
