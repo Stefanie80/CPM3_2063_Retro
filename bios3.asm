@@ -44,7 +44,7 @@ RTC_debug	equ 0
 ; These are all the publics from USER.Z80
 ;##########################################################################
 
-	extrn tickr0,tickr1,joy0,joy1
+	extrn tickr0,tickr1,joy0,joy1,usrfunc
 
 
 
@@ -382,8 +382,9 @@ endif
 	dec a
 	jr nz,.notvdp
 if VDP
-	;call vdp_init
-	; VDP init is done in the bootloader
+	;ld bc,0101h			; B=1=vdp,C=1=Init
+	;call usrfunc			; VDP init is done in the bootloader
+
 endif	
 	ret
 .notvdp:
@@ -947,22 +948,8 @@ vdp_char:			; print char in C at coordinates in D:E
 	ret
 	
 .vdp_cls:
-	ld hl,0800h		; offset for VRAM
-	ld a,l
-	out (vdp_reg),a
-	ld a,040h
-	or h
-	out (vdp_reg),a	; VDP address loaded
-	ld b,80
-	ld c,24
-	ld a,' '
-.cls:	
-	out (vdp_vram),a	; Write to the VDP
-	call .vdp_delay
-	dec b
-	jr nz,.cls
-	dec c
-	jr nz,.cls
+	ld bc,0106h					; B=1=vdp,C=6=CLS
+	call usrfunc
 	; fall through into Home
 		
 .vdp_home:
