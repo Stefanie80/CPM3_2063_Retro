@@ -142,7 +142,7 @@ read:
 
 opnmsg		db 	13,10,'BDOS OPEN: ',0
 
-signon$msg	db	13,10,'CP/M 3.0 for Z80 Retro! initializing',13,10,10,0
+signon$msg	db	13,10,'CP/M Plus for Z80 Retro!',13,10,10,0
 			
 ccp$msg		db	13,10,'BIOS Err on A: No CCP.COM file',0
 

@@ -1,0 +1,13 @@
+r Loader\cpmldr.asm
+r Loader\ldrbios.asm
+r Loader\nocache.asm
+r Loader\sdcard.asm
+r Loader\spi.asm
+
+rmac cpmldr.asm
+zmac ldrbios.asm
+
+link ldr[L100]=cpmldr,ldrbios
+era ldr.bin
+ren ldr.bin ldr.com
+w ldr.bin b

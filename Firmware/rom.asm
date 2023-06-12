@@ -9,8 +9,8 @@
 	ORG 0
 	CSEG
 	
-.debug:			equ	1
-.debug_vdp:		equ 1
+.debug:			equ	0
+.debug_vdp:		equ 0
 .debugger:		equ 0	; have some options disabled for running inside DDTZ
 
 

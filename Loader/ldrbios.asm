@@ -72,6 +72,8 @@ gpio_out_sd_ssel	equ	04h
 gpio_in_sd_det		equ	40h
 gpio_in_sd_miso		equ	80h
 
+public vinit
+	vinit equ vdp_init
 ;
 ;##########################################################################
 ; Libraries
@@ -127,7 +129,7 @@ include nocache.asm
 	;ld	sp,bios_stack		; use the private BIOS stack to get started
 
 	call	.init_console		; Note: console should still be initialized from the ROM boot loader
-	call 	vdp_init			; Init VDP
+	;call 	vdp_init			; Init VDP
 
 if .debug > 0
 	call	iputs
@@ -511,7 +513,7 @@ puts_crlf:
         call    iputs
         db    cr,lf,0 	;'wtf \r\n\0'
         ret
-
+DSEG
 .font_6x8:
 db 000h,000h,000h,000h,000h,000h,000h,000h ; 000
 db 038h,044h,06Ch,044h,054h,044h,038h,000h ; 001
@@ -770,6 +772,7 @@ db 060h,010h,020h,070h,000h,000h,000h,000h ; 0FD
 db 000h,000h,078h,078h,078h,078h,000h,000h ; 0FE
 db 000h,000h,000h,000h,000h,000h,000h,000h 	; 0FF
 .font_len equ	$-.font_6x8				   ; number of bytes to write
+cseg
 
 vdp_init:
 if .debug_vdp > 0
@@ -785,8 +788,7 @@ endif
 	; Set the VRAM write address to 0
 	ld	a,0		; LSB
 	out	(vdp_reg),a
-	push	hl	; waste some time
-	pop	hl
+	call .vdp_del
 	ld	a,040h		; MSB
 	out	(vdp_reg),a
 
@@ -796,23 +798,36 @@ endif
 
 .vram_init_loop:
 	outi				; note: this clobbers B
-
-	; waste time between transfers
-	push	hl			; waste much time between transfers
-	pop	hl
-	push	hl
-	pop	hl
+	call .vdp_del		; waste time between transfers
 	dec	de
 	ld	a,d
 	or	e
-	jp	nz,.vram_init_loop
+	jr	nz,.vram_init_loop
 	;Write a test byte
-	ld	a,0		; LSB
-	out	(vdp_reg),a
-	push	hl	; waste some time
-	pop	hl
-	ld	a,048h		; MSB
-	out	(vdp_reg),a
+
+	ld hl,0800h		; offset for VRAM
+	ld a,l
+	out (vdp_reg),a
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	ld b,80
+	ld c,24
+	ld a,' '
+.cls:	
+	out (vdp_vram),a	; Write to the VDP
+	call .vdp_del
+	dec b
+	jr nz,.cls
+	dec c
+	jr nz,.cls
+	ret
+
+.vdp_del:
+	push hl
+	pop hl
+	push hl
+	pop hl
 	ret
 
 .vdpinit:

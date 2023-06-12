@@ -13,11 +13,10 @@
 
 base	equ	$
 abase	equ	base-0100h
+cr		equ	0dh
+lf		equ	0ah
 
-cr	equ	0dh
-lf	equ	0ah
-
-fcb	equ	abase+005ch	;default FCB address
+fcb		equ	abase+005ch	;default FCB address
 buff	equ	abase+0080h	;default buffer address
 
 ;
@@ -36,6 +35,8 @@ comlen	equ	abase+81h
 bnktop	equ	abase+82h
 bnklen	equ	abase+83h
 osentry	equ	abase+84h
+
+	extrn vinit
 
 	cseg
 
@@ -139,6 +140,7 @@ execute:
 	cpi	'B'
 	cz	break
 execute$sys:
+	call vinit
 	lxi	sp,osentry$adr
 	ret
 
