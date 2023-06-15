@@ -127,6 +127,7 @@ gpio_in_sd_miso		equ	080h
 ; For obvious reasons, this option should only be used
 ; in a banked system. With 32k banks, we will need 1 bank per 2 drives.
 
+	DSEG
 
     dw  .sdcard_write
     dw  .sdcard_read
@@ -203,6 +204,8 @@ SDP3:
     dw  0FFFEh      ; DTABCB pointer will be created by GENCPM
     dw  0FFFEh      ; HASH determined by GENCPM
     dw  0FFFEh      ; HBANK determined by GENCPM
+
+	CSEG
 
 ; DPB Block for SDP0
 ; Each XDPH needs its own separate DPB
@@ -309,6 +312,8 @@ SDP3:
     dw  0002h, 04000h   ; SD logical drive 9  J: (36..39)
     dw  0002h, 08000h   ; SD logical drive 10  K: (40..43)
     dw  0002h, 0c000h   ; SD logical drive 11  L: (44..47)
+
+	DSEG
 
     dw  .sdcard_write
     dw  .sdcard_read
@@ -537,6 +542,8 @@ SD11:
     dw  0FFFEh      ; DTABCB pointer will be created by GENCPM
     dw  0FFFEh      ; HASH determined by GENCPM
     dw  0FFFEh      ; HBANK determined by GENCPM
+
+	CSEG
 
 ; These drives all share a common DPB
 
@@ -1263,6 +1270,7 @@ sd_boot:
 
 	ret
 
+	DSEG
 
 ;############################################################################
 ; Send a CMD55 (APP_CMD) message and read an R1 response.
@@ -1344,7 +1352,7 @@ endif
 .sd_acmd41_len:	equ	$-.sd_acmd41_buf
 
 
-
+	CSEG
 
 ;############################################################################
 ; A hack to just supply clock for a while.

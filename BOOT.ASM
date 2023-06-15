@@ -10,7 +10,7 @@ debug 	equ false
 	extrn	?pmsg,?conin
 	extrn	@civec,@covec,@aivec,@aovec,@lovec
 	extrn 	@cbnk,?bnksl,dumpivars,spamon,spamoff
-	extrn 	iputs,dumpregs,ictc3,usrfunc
+	extrn 	iputs,dumpregs,ictc3,ictc0,usrfunc
 
 	maclib ports
 	maclib z80
@@ -36,6 +36,8 @@ endif
 	lxi h,09000h ! shld @covec	; assign console to CRT:
 	lxi h,02000h ! shld @lovec 					; assign printer to LPT:
 	lxi h,04000h ! shld @aivec ! shld @aovec	; assign AUX to CRT1:
+	;call ictc0
+	call ictc3	
 	lxi h,signon$msg ! call ?pmsg		; print signon message
 	ret	
 
@@ -57,7 +59,6 @@ if debug
 	call iputs
 	db '?LDCCP ',0
 endif	
-	call ictc3
 	; First time, load the A:CCP.COM file into TPA
 	xra a ! sta ccp$fcb+15		; zero extent
 	lxi h,0 ! shld fcb$nr		; start at beginning of file
@@ -150,8 +151,8 @@ ccp$fcb		db	1,'CCP     ','COM',0,0,0,0
 		ds	16
 fcb$nr		db	0,0,0
 
-init$table	db 0
-		db 	0
+; init$table	db 0
+		; db 	0
 		; db	3,p$zpio$3a,0CFh,0FFh,07h	; set up config port
 		; db	3,p$zpio$3b,0CFh,000h,07h	; set up bank port
 		; db	1,p$bank$select,0	; select bank 0

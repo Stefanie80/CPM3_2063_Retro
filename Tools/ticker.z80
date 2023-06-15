@@ -1,0 +1,49 @@
+; Test Timer Callbacks
+
+org 0100h
+
+BDOS equ 5
+
+BIOSPB: 
+func:	db 30	; BIOS function 30 = USER
+areg: 	db 0 	; A register contents
+creg:	db 1 	; C register contents
+breg: 	db 0 	; B register contents
+dereg:	dw 0 	; DE register contents
+hlreg:	dw 0 	; HL register contents
+
+
+
+ld a,0
+ld (breg),a		; B=0=System
+ld a,2
+ld (creg),a		; C=2=Timer 
+ld hl,tick0		; Adress of the ticker routine
+ld (dereg),hl
+ld hl,tick1		; Adress of the ticker routine
+ld (hlreg),hl	; set DE=HL=tick 
+ld c,50			; BDOS func 50 = BIOS call
+ld de,BIOSPB	; Parameter Block
+call BDOS		; do it
+
+wait:
+	ld c,11		; BDOS func 11 = Console Status
+	call BDOS
+	or a
+	jp z,wait	; if a key pressed, this will be non-zero
+	call 0		; exit by WBOOT
+
+tick0:
+	ld c,2		; BDOS func 2, Console Output
+	ld a,'.'	; character to print
+	;call BDOS	; do it
+	ret
+
+tick1:
+	ld c,2		; BDOS func 2, Console Output
+	ld a,'_'	; character to print
+	;call BDOS	; do it
+	ret
+	
+end
+	

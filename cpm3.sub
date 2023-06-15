@@ -17,6 +17,7 @@ r drvtbl.asm
 r dump.asm
 r bios3.asm
 r sdd.z80
+;r sdp.z80
 r user.z80
 
 RMAC BIOSKRNL.ASM
@@ -28,6 +29,7 @@ zmac dump.asm
 zmac bios3.asm
 zmac sdd.z80
 zmac user.z80
+;zmac sdp.z80
 
 ; linking ...
 LINK BNKBIOS3[OS]=BIOSKRNL,SCB,BOOT,bios3,sdd,dump,user,MOVE,DRVTBL

@@ -111,14 +111,15 @@ CSEG
 		sbinit	equ	siob_init
 
 	;publics for CTC
-	public 	ictc1,ictc2,ictc3
+	public 	ictc0,ictc1,ictc2,ictc3
+		ictc0 equ init_ctc_0
 		ictc1 equ init_ctc_1
 		ictc2 equ init_ctc_2
 		ictc3 equ init_ctc_3
 
 	;publics for debug
 	public puts_crlf,cr,lf,iputs,puts
-	public spamon,spamoff
+	;public spamon,spamoff
 
 	extrn disk_dump, dumpdpb, dumpdtbl, hexdmp
 	extrn hexdump_a, dumpdma, dump_regs, dumpivars
@@ -182,6 +183,11 @@ rtc_limit:			db 153		; IRQ will happen at a freq of (CLK/256/256)
 joyport0		equ	0a8h		; I/O port for joystick 0
 joyport1		equ	0a9h		; I/O port for joystick 1
 
+; serbufa:	ds 16	; 16 bytes recieve buffer
+; bufaptr:	db 0
+; serbufb:	ds 16
+; bufptrb:	db 0
+
 					
 	public	@ctbl
 @ctbl:
@@ -209,10 +215,71 @@ public isrflags
 isrflags:
 	db 00h
 
+ctc0_isr:
+	; push af
+	; ;push bc
+	; ;push de
+	; push hl
+	; ld a,(isrflags)
+	; xor 080h
+	; ld (isrflags),a
+	; ; use bit 7 to branch into two subfunctions
+	; or 080h
+	; jr nz,.tick1
+	
+; .tick0:
+	; ld a,(isrflags)
+	; and 001h
+	; jr z,.nojoy0
+	; ; read joy0 here
+	; in a,(joyport0)
+	; ld (joy0),a
+; .nojoy0:
+	; ld a,(isrflags)
+	; and 004h
+	; jr z,.isr_tail
+	; ; call ticker0 here
+	; ld hl,(tickr0)
+	; call .tailcall
+	; jr .isr_tail
+
+; .tick1:
+	; ld a,(isrflags)
+	; and 002h
+	; jr z,.nojoy1
+	; ; read joy1 here
+	; in a,(joyport1)
+	; ld (joy1),a
+; .nojoy1:
+	; ld a,(isrflags)
+	; and 008h
+	; jr z,.isr_tail
+	; ; call ticker1 here
+	; ld hl,(tickr1)
+	; call .tailcall
+
+	; ; ld a,'.'
+	; ; ld c,a
+	; ; call con_tx_char
+; .isr_tail:
+	; pop hl
+	; ;pop de
+	; ;pop bc
+	; pop af
+	; ei
+	reti
+
+.tailcall:
+	jp (hl)
+
+
 rtc_irq_handler:
 	push af
 	push bc
 	push hl
+	;push iy
+	;push ix
+
 if RTC_debug > 0	
 	ld a,'.'
 	ld c,a
@@ -235,50 +302,14 @@ endif
 	ld a,(rtc_limit)
 	xor 01h
 	ld (rtc_limit),a
-	; use the last bit to branch into two subfunctions
-	or 01h
-	jr nz,.tick1
-	
-.tick0:
-	ld a,(isrflags)
-	and 001h
-	jr z,.nojoy0
-	; read joy0 here
-	in a,(joyport0)
-	ld (joy0),a
-.nojoy0:
-	ld a,(isrflags)
-	and 004h
-	jr z,.isr_tail
-	; call ticker0 here
-	ld hl,(tickr0)
-	call .tailcall
-	jr .isr_tail
-
-.tick1:
-	ld a,(isrflags)
-	and 002h
-	jr z,.nojoy1
-	; read joy1 here
-	in a,(joyport1)
-	ld (joy1),a
-.nojoy1:
-	ld a,(isrflags)
-	and 008h
-	jr z,.isr_tail
-	; call ticker1 here
-	ld hl,(tickr1)
-	call .tailcall
 		
-.isr_tail:		
+	;pop ix
+	;pop iy
 	pop hl
 	pop bc
 	pop af
 	ei
 	reti
-
-.tailcall:
-	jp (hl)
 
 .advance_RTC:
 if RTC_debug > 0
@@ -505,6 +536,7 @@ siob_rx_ready:
 	ret			; 0 = not ready
 
 
+	DSEG
 
 ;##############################################################
 ; init SIO port A/B
@@ -526,7 +558,7 @@ sioa_init:
 ;##############################################################
 ; Initialization string for the Z80 SIO
 ;##############################################################
-DSEG
+
 .sio_init_wr:
 	db	00011000b	; wr0 = reset everything
 	db	00000100b	; wr0 = select reg 4
@@ -584,10 +616,19 @@ sioa_rx_char:
 ; C = clock divisor
 ;#############################################################################
 
+	DSEG
+
+init_ctc_0:
+	; ld	a,0b7h			; EI, timer mode, /256 prescale, TC follows, reset, ctl
+	; out	(ctc_0),a
+	; xor a				; 0=256 (as slow as it can go = system_clock_hz/256/256)
+	; out	(ctc_0),a
+	; ld hl,ctc0_isr
+	; ld (IVTbase),hl	; load the ISR into the IVT
+	
+	ret
 
 init_ctc_1:
-;   ld      a,007h      ; TC follows, Timer, Control, Reset
-
     ld      a,047h      ; TC follows, Counter, Control, Reset
     out     (ctc_1),a
     ld      a,c
@@ -603,8 +644,6 @@ init_ctc_1:
 
 
 init_ctc_2:
-;   ld      a,0x07      ; TC follows, Timer, Control, Reset
-
     ld      a,047h      ; TC follows, Counter, Control, Reset
     out     (ctc_2),a
     ld      a,c
@@ -631,7 +670,7 @@ endif
 	out (ctc_0),a		; IRQ Vector = 0
 
 	im 2
-	ld a,0ffh
+	ld a,0FFh
 	ld i,a				; IVT starts at 0xFF00
 	
 	ld hl,rtc_irq_handler
@@ -645,6 +684,8 @@ endif
 
 	ei
 	ret
+
+	CSEG
 
 ;##############################################################
 ; Write the null-terminated string starting after the call
@@ -689,6 +730,7 @@ puts_crlf:
         defb    cr,lf,0
         ret
 
+if .debug
 spamon:
 	ld a,16
 	out (0FDh),a
@@ -698,6 +740,7 @@ spamoff:
 	xor a,a
 	out (0FDh),a
 	ret
+endif
 
 ;############################################################################
 ; An library suitable for tallking to an Epson RX-80 printer.
@@ -820,8 +863,16 @@ if VDP
 	;xor a
 	;ld (vdp_x),a
 	ret
+public vdp_cnt
+vdp_cnt: db 3
 
 .vdp_delay:
+	push af
+	ld a,(vdp_cnt)
+.delloop:
+	dec a
+	jr nz,.delloop
+	pop af
 	ret
 	
 .linebuf:
@@ -888,17 +939,13 @@ if VDP
 	ret
 
 .vdp_bs:
-	ld c,' '
-	call vdp_char
+	; ld c,' '
+	; call vdp_char
 	ld a,(vdp_x)
 	dec a
 	ld (vdp_x),a
-	ld c,' '
-	call vdp_char
-	ret
-
-vdp_put:
-
+	;ld c,' '
+	;call vdp_char
 	ret
 
 vdp_char:			; print char in C at coordinates in D:E
@@ -931,10 +978,6 @@ vdp_char:			; print char in C at coordinates in D:E
 .notrev:	
 	ld a,c
 	out (vdp_vram),a	; Write to the VDP
-	;print a cursor
-	; ld a,'_'
-	; ld c,a
-	; out (vdp_vram),a	; Write to the VDP
 	ret
 
 .vdp_ul:
@@ -951,7 +994,6 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld bc,0106h					; B=1=vdp,C=6=CLS
 	call usrfunc
 	; fall through into Home
-		
 .vdp_home:
 	xor a
 	ld (vdp_x),a
@@ -1051,6 +1093,9 @@ vdp_char:			; print char in C at coordinates in D:E
 
 	
 vdp_out:
+	push bc
+	call vdp_curs
+	pop bc
 	ld a,(vdp_esc)
 	or a
 	jp nz,.term_cmd
@@ -1080,7 +1125,7 @@ vdp_out:
 					; advance cursor position
 	ld hl,vdp_x
 	inc (hl)
-	;call vdp_cursor
+	call vdp_cursor
 	ret
 
 vdp_cursor:
@@ -1131,11 +1176,11 @@ curs_tick:
 	call vdp_cursor
 	ret
 .cmode1:
-	ld a,(vdp_x)
-	or a
-	jp z,.ende
+	;ld a,(vdp_x)
+	;or a
+	;jp z,.ende
 	ld a,h
-	and 040h
+	and 080h
 	jp z,.ende
 	ld hl,0			; clear HL
 	ld (c_tick),hl
@@ -1188,7 +1233,7 @@ vdp_y:				db 0
 vdp_esc:			db 0
 vdp_state:			db 0
 vdp_rev:			db 0
-cursor:				db '_'
+cursor:				db 0A0h;'_'
 curs0:				db '_' ;0A0h for block
 curs1:				db ' '
 c_tick:				dw 0

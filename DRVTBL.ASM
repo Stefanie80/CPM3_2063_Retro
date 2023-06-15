@@ -4,6 +4,6 @@
 	cseg
 
 @dtbl	dw SDP1,SD0,SD1,SD2,SD3,SD4,SD5,SD6,SD7,SD8,SD9,SD10,SD11
-		dw 0,0,0		; drives C-P non-existant
-
+		dw 0,0,0
+		
 	end

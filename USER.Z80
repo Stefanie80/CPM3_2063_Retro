@@ -13,24 +13,23 @@ joyport1	equ	0a9h	; I/O port for joystick 1
 	extrn	setbank,iputs,hexdump_a
 	extrn	@cbnk,@MXTPA
 	extrn 	curs0,curs1,isrflags
-
+	extrn 	vdp_cnt
+	
 CSEG
 
 .xmem_base:
 	dw 0h	; this must be set by the init call
 
 public tickr0,tickr1
+tickr0:	dw 0h
+tickr1:	dw 0h
 
-tickr0:
-	dw 0h
-tickr1:
-	dw 0h
-
-public joy0,joy1
-
+public 	joy0,joy1
 joy0:	db 0h
 joy1:	db 0h
-	
+
+vdpfnt:	db 0h
+
 ; Calling convention:
 ;
 ; B = Function Group
@@ -268,20 +267,19 @@ if VDP
 	add hl,de
 	ex de,hl
 	; HL=source, DE=destination
-	ld c,128
+	ld c,128		; 128 Characters
 .cvloop:
-	ld b,8
+	ld b,8			; 8 bytes / char
 .cvlop:	
 	ld a,(hl)
-	neg
-	dec a
+	cpl
 	ld (de),a
 	inc hl
 	inc de
 	dec b
-	jr nz,.cvlop
+	jr nz,.cvlop	; next byte
 	dec c
-	jr nz,.cvloop
+	jr nz,.cvloop	; next char
 	ret
 	
 .vdp_init:
@@ -517,12 +515,39 @@ endif
 	ret
 
 .tick_set:
+	ld (tickr0),hl
+	ld a,h
+	or l
+	jr nz,.enabl0
+	ld a,(isrflags)
+	and 0FBh
+	ld (isrflags),a
+.enabl0: 
+	ld a,(isrflags)
+	or 004h
+	ld (isrflags),a
+	
+	ld (tickr1),de
+	ld a,d
+	or e
+	jr nz,.enabl1
+	ld a,(isrflags)
+	and 0F7h
+	ld (isrflags),a
+.enabl1:
+	ld a,(isrflags)
+	or 008h
+	ld (isrflags),a
 	ret
 
 if VDP
 .vdp_delay:
-	push hl
-	pop hl
+	push af
+	ld a,(vdp_cnt)
+.delloop:
+	dec a
+	jr nz,.delloop
+	pop af
 	ret
 
 vdp_vram			equ	080h	; VDP port for accessing the VRAM
