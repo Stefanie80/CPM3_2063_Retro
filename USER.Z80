@@ -101,11 +101,11 @@ public usrfunc
 usrfunc:
 	ld a,b
 	or a				
-	jp z,.sys		; B == 0
+	jr z,.sys		; B == 0
 	dec a				
-	jp z,.vdp		; B == 1
+	jr z,.vdp		; B == 1
 	dec a				
-	jp z,.joy		; B == 2	
+	jr z,.joy		; B == 2	
 	ret
 
 .sys:
@@ -145,13 +145,13 @@ endif
 .joy:
 	ld a,c
 	or a				
-	jp z,.joy_0	; C == 0
+	jr z,.joy_0	; C == 0
 	dec a
-	jp z,.joy_1	; C == 1
+	jr z,.joy_1	; C == 1
 	dec a
-	jp z,.joys	; C == 2
+	jr z,.joys	; C == 2
 	dec a
-	jp z,.joypoll	; C == 3
+	jr z,.joypoll	; C == 3
 	ret
 
 ; Idea: Timer based autopolling.
@@ -165,30 +165,30 @@ endif
 
 .joypoll:
 	; enable autopolling
-	ld a,d
-	and 03h			; mask out all but the last 2 bits
-	ld d,a
-	ld a,(isrflags)
-	and 0Ch			; mask away the 2 bits
-	or d			; and or in the new ones
-	ld (isrflags),a
-	ld hl,joy0		; return the buffer address 
-	ld de,joy0
-	ld bc,joy0
-if .joydebug
-	push hl
-	call iputs
-	db 	'JOY ADR ',cr,lf,0
-	pop hl
-	ld a,h
-	push hl
-	call hexdump_a
-	pop hl
-	ld a,l
-	call hexdump_a
-	call iputs
-	db 0dh,0ah,0
-endif
+	; ld a,d
+	; and 03h			; mask out all but the last 2 bits
+	; ld d,a
+	; ld a,(isrflags)
+	; and 0Ch			; mask away the 2 bits
+	; or d			; and or in the new ones
+	; ld (isrflags),a
+	; ld hl,joy0		; return the buffer address 
+	; ld de,joy0
+	; ld bc,joy0
+; if .joydebug
+	; push hl
+	; call iputs
+	; db 	'JOY ADR ',cr,lf,0
+	; pop hl
+	; ld a,h
+	; push hl
+	; call hexdump_a
+	; pop hl
+	; ld a,l
+	; call hexdump_a
+	; call iputs
+	; db 0dh,0ah,0
+; endif
 	ret
 
 .joys:
@@ -425,8 +425,8 @@ endif
 	rla
 	rla
 	and 0F0h
-	scf
-	ccf
+	;scf
+	;ccf
 	rra
 if .sysdebug > 0
 	push af
@@ -475,8 +475,8 @@ endif
 	rla
 	rla
 	and 0F0h
-	scf
-	ccf
+	;scf
+	;ccf
 	rra
 	ld h,a
 	ld l,0
@@ -515,29 +515,29 @@ endif
 	ret
 
 .tick_set:
-	ld (tickr0),hl
-	ld a,h
-	or l
-	jr nz,.enabl0
-	ld a,(isrflags)
-	and 0FBh
-	ld (isrflags),a
-.enabl0: 
-	ld a,(isrflags)
-	or 004h
-	ld (isrflags),a
+	; ld (tickr0),hl
+	; ld a,h
+	; or l
+	; jr nz,.enabl0
+	; ld a,(isrflags)
+	; and 0FBh
+	; ld (isrflags),a
+; .enabl0: 
+	; ld a,(isrflags)
+	; or 004h
+	; ld (isrflags),a
 	
-	ld (tickr1),de
-	ld a,d
-	or e
-	jr nz,.enabl1
-	ld a,(isrflags)
-	and 0F7h
-	ld (isrflags),a
-.enabl1:
-	ld a,(isrflags)
-	or 008h
-	ld (isrflags),a
+	; ld (tickr1),de
+	; ld a,d
+	; or e
+	; jr nz,.enabl1
+	; ld a,(isrflags)
+	; and 0F7h
+	; ld (isrflags),a
+; .enabl1:
+	; ld a,(isrflags)
+	; or 008h
+	; ld (isrflags),a
 	ret
 
 if VDP

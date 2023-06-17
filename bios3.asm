@@ -188,7 +188,10 @@ joyport1		equ	0a9h		; I/O port for joystick 1
 ; serbufb:	ds 16
 ; bufptrb:	db 0
 
-					
+;###############################################
+; Character devices
+;###############################################
+
 	public	@ctbl
 @ctbl:
 	db 	'SIO-A '	; device 0, CRT port 0
@@ -210,6 +213,9 @@ endif
 	db	0
 	db 	0			; table terminator
 					
+;###############################################
+; Interrupt service routines
+;###############################################
 					
 public isrflags
 isrflags:
@@ -258,9 +264,9 @@ ctc0_isr:
 	; ld hl,(tickr1)
 	; call .tailcall
 
-	; ; ld a,'.'
-	; ; ld c,a
-	; ; call con_tx_char
+	; ld a,'.'
+	; ld c,a
+	; call con_tx_char
 ; .isr_tail:
 	; pop hl
 	; ;pop de
@@ -269,17 +275,15 @@ ctc0_isr:
 	; ei
 	reti
 
-.tailcall:
-	jp (hl)
+; .tailcall:
+	; jp (hl)
+
+
 
 
 rtc_irq_handler:
 	push af
 	push bc
-	push hl
-	;push iy
-	;push ix
-
 if RTC_debug > 0	
 	ld a,'.'
 	ld c,a
@@ -305,11 +309,15 @@ endif
 		
 	;pop ix
 	;pop iy
-	pop hl
+	;pop hl
 	pop bc
 	pop af
 	ei
 	reti
+
+;###############################################
+; Real Time Clock
+;###############################################
 
 .advance_RTC:
 if RTC_debug > 0
@@ -348,11 +356,17 @@ endif
 	xor a
 	ret
 .incdate:	
+	push hl
 	ld hl,(@date)		;@date word
 	inc hl
-	ld (@date),hl			
+	ld (@date),hl
+	pop hl
 	xor a
 	ret
+
+;###############################################
+; Set Memory Bank
+;###############################################
 
 setbank:
 if m_debug
@@ -384,7 +398,12 @@ endif
 	ld	(gpiocache),a
 	out	(gpio_out),a
 	ret
-	
+
+;###############################################
+; Init char devices
+;###############################################
+	DSEG
+
 ?cinit:
 	; C = 0
 	ld a,c				; C= device number
@@ -427,6 +446,12 @@ endif
 	; invalid device
 	ret
 
+	CSEG
+
+;###############################################
+; Console Input
+;###############################################
+
 ?ci:
 	ld a,b
 	or a
@@ -435,6 +460,10 @@ endif
 	jp z,siob_rx_char
 	; other devices have no input
 	ret
+
+;###############################################
+; Console Output
+;###############################################
 
 ?co:
 	ld a,b				; B = device number
@@ -449,6 +478,10 @@ if VDP
 	jp z,vdp_out
 endif
 	ret
+
+;###############################################
+; Input status
+;###############################################
 
 ?cist:
 if VDP
@@ -469,6 +502,9 @@ endif
 	ld	a,0ffh
 	ret		; A = 0xff = ready
 
+;###############################################
+; Output Status
+;###############################################
 
 ?cost:
 	ld a,b
@@ -568,8 +604,8 @@ sioa_init:
 	db	00000101b	; wr0 = select reg 5
 	db	01101000b	; wr5 = DTR=0, TX enable, 8 bits/char
 .sio_init_len_wr:   equ $-.sio_init_wr
-CSEG
 
+	CSEG
 
 ;##############################################################
 ; Wait for the transmitter to become ready and then
@@ -609,7 +645,7 @@ sioa_rx_char:
 	in	a,(sio_ad)
 	ret
 
-; Drivers for CTC port 1
+; Drivers for CTC
 
 ;#############################################################################
 ; Init the bit-rate generator for SIO A.
@@ -635,8 +671,6 @@ init_ctc_1:
     out     (ctc_1),a
     ret
 
-; Driver for CTC port 2
-
 ;#############################################################################
 ; Init the bit-rate generator for SIO B.
 ; C = clock divisor
@@ -649,8 +683,6 @@ init_ctc_2:
     ld      a,c
     out     (ctc_2),a
     ret
-
-; Drivers for CTC port 3
 
 ;#############################################################################
 ; Set CTC3 to free-run and generate IRQs at system_clock_hz/65536.
@@ -755,13 +787,14 @@ endif
 ;
 ; Clobbers AF
 ;##########################################################################
+DSEG
 prn_init:
 	ld	a,(gpiocache)
 	or	gpio_out_prn_stb	; make PRN_STB high (false)
 	ld	(gpiocache),a	; save in the cached output value
 	out	(gpio_out),a		; make it so in the GPIO register too
 	ret
-
+CSEG
 ;##########################################################################
 ; Return A=0 if printer is not ready.
 ; Return A=0xff if printer is ready.
@@ -863,6 +896,12 @@ if VDP
 	;xor a
 	;ld (vdp_x),a
 	ret
+
+;###############################################
+; Delay for writing to VDP
+; TODO: Set delay counter according to CPU Clock
+;###############################################
+
 public vdp_cnt
 vdp_cnt: db 3
 
@@ -877,6 +916,10 @@ vdp_cnt: db 3
 	
 .linebuf:
 	ds 40
+
+;###############################################
+; Scroll the screen
+;###############################################
 	
 .vdp_scroll:
 	ld c,23				; 23 lines to scroll
@@ -989,6 +1032,10 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld hl,vdp_x
 	inc (hl)
 	ret
+
+;###############################################
+; Clear Screen / Home Cursor
+;###############################################
 	
 .vdp_cls:
 	ld bc,0106h					; B=1=vdp,C=6=CLS
@@ -1000,40 +1047,52 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld (vdp_y),a
 	ret
 
+;###############################################
+; Start ESC sequence
+;###############################################
+
 .vdp_escape:
 	ld a,1
 	ld (vdp_esc),a
 	ret
 
+;###############################################
+; Process ESC sequence
+;###############################################
+
 .term_cmd:
 	ld a,(vdp_state)
 	or a
-	jp z,.state0
+	jr z,.state0
 	dec a
-	jp z,.term_atr
-	jp .term_xy
+	jr z,.term_atr
+	jr .term_xy
 .state0:	
 	ld a,c
 	cp '='
-	jp z,.term_xy
+	jr z,.term_xy
 	cp 'G'
-	jp z,.term_atr
+	jr z,.term_atr
 	;invalid control sequence
 	xor a
 	ld (vdp_state),a
 	ld (vdp_esc),a
 	ret
 	
+;###############################################
+; Set Position
+;###############################################
+	
 .term_xy:
 	ld a,(vdp_state)
 	or a
-	jp z,.xy_state0
+	jr z,.xy_state0
 	dec a
-	jp z,.xy_end
+	jr z,.xy_end
 	dec a
-	jp z,.xy_row
+	jr z,.xy_row
 	dec a
-	jp z,.xy_col
+	jr z,.xy_col
 	ret
 .xy_row:
 	ld a,c
@@ -1046,7 +1105,7 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld a,c
 	sub 32
 	ld (vdp_x),a
-	jp .xy_end
+	jr .xy_end
 .xy_state0:
 	ld a,2
 	ld (vdp_state),a
@@ -1057,22 +1116,26 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld (vdp_esc),a
 	ret
 
+;###############################################
+; Set Terminal Attributes
+;###############################################
+
 .term_atr:
 	ld a,(vdp_state)
 	or a
-	jp z,.atr_state0
+	jr z,.atr_state0
 	dec a
-	jp nz,.atr_end
+	jr nz,.atr_end
 	ld a,c
 	cp '0'
-	jp z,.vdp_mode_def
+	jr z,.vdp_mode_def
 	cp '4'
-	jp z,.vdp_mode_rev
+	jr z,.vdp_mode_rev
 	cp 'P'
-	jp z,.vdp_mode_def
+	jr z,.vdp_mode_def
 	cp 'T'
-	jp z,.vdp_mode_rev
-	jp .atr_end
+	jr z,.vdp_mode_rev
+	jr .atr_end
 .atr_state0:
 	ld a,1
 	ld (vdp_state),a
@@ -1091,16 +1154,20 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld (vdp_rev),a
 	ret
 
+;###############################################
+; Process Character
+;###############################################
 	
 vdp_out:
 	push bc
-	call vdp_curs
+	call vdp_curs	; remove the cursor
 	pop bc
-	ld a,(vdp_esc)
+	ld a,(vdp_esc)	; check if a ESC sequence has been started
 	or a
-	jp nz,.term_cmd
+	jp nz,.term_cmd	; byte is part of ESC sequence, process separately
 	ld a,c
-	cp a,01Bh
+		; check non-printable characters
+	cp a,01Bh		; ESC
 	jp z,.vdp_escape
 	cp a,00Ah		; linefeed
 	jp z,.vdp_lf
@@ -1116,17 +1183,21 @@ vdp_out:
 	jp z,.vdp_cls
 	cp a,01Eh		; Home
 	jp z,.vdp_home
-			; if we get here, we have a printable character
+		; if we get here, we have a printable character
 	ld a,(vdp_x)
 	ld e,a
 	ld a,(vdp_y)
 	ld d,a
 	call vdp_char
-					; advance cursor position
+		; advance cursor position
 	ld hl,vdp_x
 	inc (hl)
 	call vdp_cursor
 	ret
+
+;###############################################
+; Print Cursor
+;###############################################
 
 vdp_cursor:
 	ld a,(vdp_x)
@@ -1142,6 +1213,10 @@ vdp_cursor:
 .curende:	
 	ret
 	
+;###############################################
+; Remove Cursor
+;###############################################
+	
 vdp_curs:
 	ld a,(vdp_x)
 	or a
@@ -1155,6 +1230,10 @@ vdp_curs:
 	call vdp_char
 .curend:
 	ret
+
+;###############################################
+; Make Cursor Blink
+;###############################################
 
 curs_tick:
 	ld hl,(c_tick)
@@ -1222,7 +1301,9 @@ curs_tick:
 .ende:	
 	ret
 
-
+;###############################################
+; Variables for VDP
+;###############################################
 
 vdp_vram			equ	080h	; VDP port for accessing the VRAM
 vdp_reg				equ	081h	; VDP port for accessing the registers

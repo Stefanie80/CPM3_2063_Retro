@@ -127,7 +127,9 @@ gpio_in_sd_miso		equ	080h
 ; For obvious reasons, this option should only be used
 ; in a banked system. With 32k banks, we will need 1 bank per 2 drives.
 
+if banked
 	DSEG
+endif
 
     dw  .sdcard_write
     dw  .sdcard_read
@@ -205,7 +207,9 @@ SDP3:
     dw  0FFFEh      ; HASH determined by GENCPM
     dw  0FFFEh      ; HBANK determined by GENCPM
 
+if banked
 	CSEG
+endif
 
 ; DPB Block for SDP0
 ; Each XDPH needs its own separate DPB
@@ -313,7 +317,9 @@ SDP3:
     dw  0002h, 08000h   ; SD logical drive 10  K: (40..43)
     dw  0002h, 0c000h   ; SD logical drive 11  L: (44..47)
 
+if banked
 	DSEG
+endif
 
     dw  .sdcard_write
     dw  .sdcard_read
@@ -543,7 +549,9 @@ SD11:
     dw  0FFFEh      ; HASH determined by GENCPM
     dw  0FFFEh      ; HBANK determined by GENCPM
 
+if banked
 	CSEG
+endif
 
 ; These drives all share a common DPB
 
@@ -1698,167 +1706,32 @@ spi_write_str:
 	djnz	spi_write_str	; count the byte & continue of not done
 	ret
 
+mul16:
+   ;Inputs:
+   ;     DE and BC are factors
+   ;Outputs:
+   ;     A is 0
+   ;     BC is not changed
+   ;     DE:HL is the product
+   ;902cc~1206cc, avg=1050cc
+   ;20 bytes
+          ld hl,0
+          ld a,16
+   Mul_Loop_1:
+            add hl,hl
+            rl e 
+			rl d
+            jr nc,$+6
+              add hl,bc
+              jr nc,$+3
+              inc de
+            dec a
+            jr nz,Mul_Loop_1
+          ret
+		  
 if banked
 	DSEG
 endif
-	  ;This was made by Runer112
-;Tested by jacobly
-mul16:
-;BC*DE --> DEHL
-; ~544.887cc as calculated in jacobly's test
-;min: 214cc  (DE = 1)
-;max: 667cc
-;avg: 544.4507883cc   however, deferring to jacobly's result as mine may have math issues ?
-    ld    a,d
-    ld    d,0
-    ld    h,b
-    ld    l,c
-    add    a,a
-    jr    c,mul_14
-    add    a,a
-    jr    c,mul_13
-    add    a,a
-    jr    c,mul_12
-    add    a,a
-    jr    c,mul_11
-    add    a,a
-    jr    c,mul_10
-    add    a,a
-    jr    c,mul_9
-    add    a,a
-    jr    c,mul_8
-    add    a,a
-    jr    c,mul_7
-    ld    a,e
-     and    11111110b
-    add    a,a
-    jr    c,mul_6
-    add    a,a
-    jr    c,mul_5
-    add    a,a
-    jr    c,mul_4
-    add    a,a
-    jr    c,mul_3
-    add    a,a
-    jr    c,mul_2
-    add    a,a
-    jr    c,mul_1
-    add    a,a
-    jr    c,mul_0
-    rr    e
-    ret    c
-    ld    h,d
-    ld    l,e
-    ret
-mul_14:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_13
-    add    hl,bc
-    adc    a,d
-mul_13:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_12
-    add    hl,bc
-    adc    a,d
-mul_12:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_11
-    add    hl,bc
-    adc    a,d
-mul_11:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_10
-    add    hl,bc
-    adc    a,d
-mul_10:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_9
-    add    hl,bc
-    adc    a,d
-mul_9:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_8
-    add    hl,bc
-    adc    a,d
-mul_8:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_7
-    add    hl,bc
-    adc    a,d
-mul_7:
-    ld    d,a
-    ld    a,e
-    and    11111110b
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_6
-    add    hl,bc
-    adc    a,0
-mul_6:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_5
-    add    hl,bc
-    adc    a,0
-mul_5:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_4
-    add    hl,bc
-    adc    a,0
-mul_4:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_3
-    add    hl,bc
-    adc    a,0
-mul_3:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_2
-    add    hl,bc
-    adc    a,0
-mul_2:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_1
-    add    hl,bc
-    adc    a,0
-mul_1:
-    add    hl,hl
-    adc    a,a
-    jr    nc,mul_0
-    add    hl,bc
-    adc    a,0
-mul_0:
-    add    hl,hl
-    adc    a,a
-    jr    c,mul_fc
-    rr    e
-    ld    e,a
-    ret    nc
-    add    hl,bc
-    ret    nc
-    inc    e
-    ret    nz
-    inc    d
-    ret
-mul_fc:
-    inc    d
-    rr    e
-    ld    e,a
-    ret    nc
-    add    hl,bc
-    ret    nc
-    inc    e
-    ret
 
 .sdcard_init:
 if .sd_debug >= 2
@@ -2446,7 +2319,11 @@ endif
 .err0:
 	ld a,0FFh
 	ret
-	
+
+if banked
+	CSEG
+endif
+
 ;##########################################################################
 ; Calculate the address of the SD block, given the CP/M track number
 ; in HL and the fact that the currently selected drive's DPH is in 
@@ -2605,6 +2482,9 @@ if .sd_debug >= 2
 endif
 	ret
 
+if banked
+	DSEG
+endif
 
 ;############################################################################
 ; Get the SD card to wake up ready for block transfers.
@@ -2765,7 +2645,11 @@ endif
 
 .sd_cmd8_buf:	db	8|040h,0,0,001h,0aah,086h|001h
 .sd_cmd8_len:	equ	$-.sd_cmd8_buf
-	
+
+if banked
+	CSEG
+endif
+
 ; DEBUG CODE BELOW
 if .sd_debug >= 1
 

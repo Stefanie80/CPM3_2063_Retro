@@ -30,35 +30,6 @@ endif
 	ex de,hl		; need next addresses in same regs
 	ret
 
-copyccp:
-	; copy the CCP from bank 1 to bank E
-	ld d,32		; 32 * 128 = 4k to copy
-	push de
-
-.ccploop:
-	
-	pop de
-	dec d			; decrease block count
-	jr nz,.ccploop
-	
-	ld a,1
-	call setbank	; make sure to leave with the TPA selected
-	ret
-
-reloadccp:
-	; copy the CCP from bank E to bank 1
-	ld d,32		; 32 * 128 = 4k to copy
-	push de
-
-.relloop:
-	
-	pop de
-	dec d			; decrease block count
-	jr nz,.relloop
-	
-	ld a,1
-	call setbank	; make sure to leave with the TPA selected
-	ret
 
 ?bank:
 	push bc				; save register b for temp

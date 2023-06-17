@@ -576,11 +576,7 @@ setdma:
 	;		transfers.
 
 setbnk:
-	push psw
-	;call spamon
-	pop psw
 	sta @dbnk
-	;call spamoff
 	ret
 
 
