@@ -54,6 +54,8 @@ For the bootloader:  SUBMIT LDR
 
 For the Tools:       SUBMIT TOOLS
 
+All resulting files will be placed in the "build" folder.
+
 
 For those who do not wish to tinker with the source, or want to try the system before diving into it, 
 i have prepared a package containing a fully running system with an emulator of John's board. You can download it here:
