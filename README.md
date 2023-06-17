@@ -27,11 +27,33 @@ altairz80.exe,cpm3,cpm3.dsk
 Once you start the .exe, you have to enter "do cpm3" to start the system.
 Once it is booted, switch to drive I: to initialize it, then switch back to A: and copy over some tools to the I: drive.
 
-Specifically, you will need to copy RMAC.COM,ZMAC.COM,R.COM,W.COM,SUBMIT.COM,GENCPM.COM,RENAME.COM and LINK.COM.
-You have to use the CP/M tool PIP for this. The general syntax is "PIP dest=source". 
+You have to use the CP/M tool PIP for this. The general syntax is "PIP dest=source".
 For example: "PIP I:=RMAC.COM" will copy RMAC.COM from the drive you are on to drive I:
-To read ZMAC.COM you need to enter "r Tools\ZMAC.COM"
-You will also need some files from the CP/M 3 distribution disk.
+Specifically, you will need to copy R.COM and SUBMIT.COM by executing these commands:
+
+PIP I:=R.COM
+
+PIP I:=SUBMIT.COM
+
+
+Once you have done this, enter "I:" to switch to that drive, and execute:
+
+R PREP.SUB
+
+SUBMIT PREP
+
+
+This will run the PREP script. This will copy over the remaining tools from drive A: and read the remaining .SUB files from the subfolders.
+After that, you can build everything using the following commands:
+
+To build CPM3.SYS:   SUBMIT CPM3
+
+For the boot ROM:    SUBMIT ROM
+
+For the bootloader:  SUBMIT LDR
+
+For the Tools:       SUBMIT TOOLS
+
 
 For those who do not wish to tinker with the source, or want to try the system before diving into it, 
 i have prepared a package containing a fully running system with an emulator of John's board. You can download it here:
