@@ -37,10 +37,21 @@ For those who do not wish to tinker with the source, or want to try the system b
 i have prepared a package containing a fully running system with an emulator of John's board. You can download it here:
 https://drive.google.com/file/d/10RHLt3bqPHN4sBdgkRkXFwICIUTqFL7T/view?usp=drive_link
 
+You can also make your own board and use the system on real hardware. All the files needed for the board can be found in John's repository mentioned above.
+His board is specifically designed to be 100mm², because that size gives a big discount when ordering PCBs from PCBway or other PCB makers. 
+And it uses almost exclusively through hole components, so it is easy to solder by hand.
+
+The image included in the binary .ZIP distrubution can be written to a blank SD card and will boot without further preparation. 
+The included 2063.ROM is the code that needs to be written to the flash chip. You can use John's ROM code, but at this point, 
+only the dev branch ROM code has been confirmed to work. And the official ROM code doesn't initialize the VDP. So if you have the optional VDP board, 
+my ROM code will provide a cleaner booting expirience.
+
 It includes a binary of the emulator, build from this repository:
 https://github.com/EtchedPixels/EmulatorKit
 
 Currently, it only runs on linux. This specific binary was compiled on Linux Mint Debian Edition.
+It has a few limitations. The RTC will not run too slow. This is caused by the emulator and doesn't happen on real hardware. 
+Also the emulated VDP doesn't support sprites, so some games will only work partially.
 The file EXIT.ASM is not part of the system itself. Rather, it is a little tool for use with the mentioned emulator. 
 All it does is exit the emulator from the inside.
 
