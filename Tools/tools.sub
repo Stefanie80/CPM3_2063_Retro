@@ -1,0 +1,27 @@
+r Tools\exit.z80
+r Tools\joys.z80
+r Tools\setcol.sub
+r Tools\xmm.z80
+r Tools\xmms.z80
+
+zmac xmm
+link xmm [op]
+era xmm.rsx
+ren xmm.rsx=xmm.prl
+zmac xmms
+link xmms
+
+zmac setcol
+link color=setcol
+
+zmac joys
+link joys
+
+zmac exit
+link exit
+
+w build\xmm.rsx b
+w build\xmms.com b
+w build\color.com b
+w build\joys.com b
+w build\exit.com b

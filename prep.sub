@@ -1,0 +1,15 @@
+A:
+pip i:=gencpm.com
+pip i:=w.com
+pip i:=submit.com
+pip i:=rmac.com
+pip i:=link.com
+pip i:=rename.com
+I:
+
+r Binaries\ZMAC.COM
+r System\cpm3.sub
+r Firmware\rom.sub
+r Loader\ldr.sub
+r Tools\tools.sub
+

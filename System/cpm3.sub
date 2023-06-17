@@ -1,0 +1,42 @@
+; Reading and assembling
+;
+;	DRI Sources
+;
+;	using RMAC
+;
+r System\modebaud.lib
+r System\ports.lib
+r System\z80.lib
+r System\cpm3.lib
+
+r System\bioskrnl.asm
+r System\scb.asm
+r System\boot.asm
+r System\drvtbl.asm
+r System\move.z80
+r System\dump.z80
+r System\bios3.z80
+r System\sdd.z80
+r System\user.z80
+
+RMAC BIOSKRNL.ASM
+RMAC SCB.ASM
+RMAC BOOT.ASM
+RMAC DRVTBL.ASM
+ZMAC MOVE
+zmac dump
+zmac bios3
+zmac sdd
+zmac user
+
+; linking ...
+LINK BNKBIOS3[OS]=BIOSKRNL,SCB,BOOT,bios3,sdd,dump,user,MOVE,DRVTBL
+
+r System\bnkbdos3.spr
+r System\resbdos3.spr
+r System\gencpm.dat
+
+; GENCPM
+gencpm auto
+; write output
+w build\cpm3.sys b

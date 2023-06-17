@@ -1,0 +1,574 @@
+; Various dump routines
+; to see whats going on
+
+DSEG
+
+	public disk_dump, dumpdpb, dumpdtbl, hexdmp
+	public hexdump_a, dumpdma, dump_regs, dumpivars
+	
+	public dumpregs
+dumpregs equ dump_regs
+
+	extrn ?co, iputs, puts_crlf
+	
+	extrn @civec, @covec, @aivec, @aovec, @lovec, @bnkbf
+	extrn @crdma, @crdsk, @vinfo, @resel, @fx, @usrcd
+	extrn @mltio, @ermde, @erdsk, @media, @bflgs
+	extrn @date, @hour, @min, @sec, ?erjmp, @mxtpa, @dtbl
+	extrn @adrv,@rdrv,@trk,@sect	; parameters for disk I/O
+	extrn @dma,@dbnk,@cnt,@cbnk
+
+
+disk_dump:
+    push    hl
+    push    de
+    push    bc
+    
+    call    iputs
+    db      '@adrv=',0
+    ld      a,(@adrv)
+    call    hexdump_a
+
+    call    iputs
+    db      ', @rdrv=',0
+    ld      a,(@rdrv)
+    call    hexdump_a
+
+    call    iputs
+    db      ', @dbnk=',0
+    ld      a,(@dbnk)
+    call    hexdump_a
+
+    call    iputs
+    db      ', @cbnk=',0
+    ld      a,(@cbnk)
+    call    hexdump_a
+
+    call    iputs
+    db      ', @trk=',0
+    ld      a,(@trk+1)
+    call    hexdump_a
+    ld      a,(@trk)
+    call    hexdump_a
+
+    call    iputs
+    db      ', @sect=',0
+    ld      a,(@sect+1)
+    call    hexdump_a
+    ld      a,(@sect)
+    call    hexdump_a
+
+    call    iputs
+    db      ', @dma=',0
+    ld      a,(@dma+1)
+    call    hexdump_a
+    ld      a,(@dma)
+    call    hexdump_a
+
+    call    puts_crlf
+    
+    pop bc
+    pop de
+    pop hl
+    ret
+
+dumpdpb:		; dump the DBP pointed to by IX
+	call iputs
+	db	'DPB:',0
+	ld 	a,(@rdrv)
+	call hexdump_a
+	call iputs
+	db	' @ 0x',0
+	ld 	a,(ix -4)
+	call hexdump_a
+	ld 	a,(ix -3)
+	call hexdump_a
+	ld 	a,(ix -2)
+	call hexdump_a
+	ld 	a,(ix -1)
+	call hexdump_a
+	call puts_crlf
+	
+	call iputs
+	db	' SPT=',0
+	ld 	a,(ix+1)
+	call hexdump_a
+	ld 	a,(ix)
+	call hexdump_a
+	
+	call iputs
+	db	' BSH=',0
+	ld 	a,(ix+2)
+	call hexdump_a
+	
+	call iputs
+	db	' BLM=',0
+	ld 	a,(ix+3)
+	call hexdump_a
+	
+	call iputs
+	db	' EXM=',0
+	ld 	a,(ix+4)
+	call hexdump_a
+
+	call puts_crlf
+	
+	call iputs
+	db	' DSM=',0
+	ld 	a,(ix+6)
+	call hexdump_a
+	ld 	a,(ix+5)
+	call hexdump_a
+	
+	call iputs
+	db	' DRM=',0
+	ld 	a,(ix+8)
+	call hexdump_a
+	ld 	a,(ix+7)
+	call hexdump_a
+	
+	call iputs
+	db	' AL0=',0
+	ld 	a,(ix+9)
+	call hexdump_a
+	
+	call iputs
+	db	' AL1=',0
+	ld 	a,(ix+10)
+	call hexdump_a
+
+	call puts_crlf
+	
+	call iputs
+	db	' CKS=',0
+	ld 	a,(ix+12)
+	call hexdump_a
+	ld 	a,(ix+11)
+	call hexdump_a
+
+	call iputs
+	db	' OFF=',0
+	ld 	a,(ix+14)
+	call hexdump_a
+	ld 	a,(ix+13)
+	call hexdump_a
+
+	call iputs
+	db	' PSH=',0
+	ld 	a,(ix+15)
+	call hexdump_a
+	
+	call iputs
+	db	' PHM=',0
+	ld 	a,(ix+16)
+	call hexdump_a
+	call puts_crlf
+
+	ret
+
+dumpdtbl:
+	push ix
+	call iputs
+	db	'DTBL @ ',0
+	ld hl,@dtbl
+	ld 	a,h
+	call hexdump_a
+	ld 	a,l
+	call hexdump_a
+	call puts_crlf
+	
+	push hl
+	pop ix		; IX -> @DTBL
+	ld b,0
+	ld c,16		; C = counter
+	; dump address
+.dmploop:
+	push bc		; save counter
+	ld 	a,(ix+1)
+	call hexdump_a
+	ld 	a,(ix)
+	call hexdump_a
+	call iputs
+	db	' ',0
+	inc ix
+	inc ix
+	pop bc
+	dec c
+	jr nz,.dmploop
+	call puts_crlf
+	pop ix
+	ret
+
+;#############################################################################
+; Dump BC bytes of memory from address in HL.
+; if E is zero, no fancy formatting
+; Does not clobber any registers
+;#############################################################################
+hexdmp:
+	push	af
+	push	de
+	push	hl
+	push	bc
+	jp	.hexdump0
+
+.hexdump_loop:
+	ld	a,e			; fancy format or continuous?
+	or	a
+	jr	z,.hd_not8		; not fancy -> hd_not8
+
+	ld	a,l
+	and	00fh
+	jr	z,.hexdump0n
+	cp	008h			; put an extra space between positiioons 7 and 8
+	jr	nz,.hd_not8
+	ld	c,' '
+	call	?co
+.hd_not8:
+	ld	c,' '
+	call	?co
+	jp	.hexdump1
+
+.hexdump0n:
+	call	puts_crlf
+.hexdump0:
+	ld	a,h
+	call	hexdump_a
+	ld	a,l
+	call	hexdump_a
+	ld	c,':'
+	call	?co
+	ld	c,' '
+	call	?co
+
+.hexdump1:
+	ld	a,(hl)
+	call	hexdump_a
+	inc	hl
+
+	pop	bc
+	dec	bc
+	push	bc
+
+	ld	a,b
+	or	c
+	jr	nz,.hexdump_loop
+	call	puts_crlf
+
+	pop	bc
+	pop	hl
+	pop	de
+	pop	af
+	ret
+
+
+;#############################################################################
+; Print the value in A in hex
+; Clobbers C
+;#############################################################################
+hexdump_a:
+	push	af
+	srl	a
+	srl	a
+	srl	a
+	srl	a
+	call	.hexdump_nib
+	pop	af
+	push	af
+	and	00fh
+	call	.hexdump_nib
+	pop	af
+	ret
+
+.hexdump_nib:
+	add	'0'
+	cp	'9'+1
+	jp	m,.hexdump_num
+	add	'A'-'9'-1
+.hexdump_num:
+	ld	c,a
+	jp	?co	   ; tail
+
+;#############################################################################
+; Print the values of BC, DE, HL
+; Clobber nothing, save everything
+; Beware: Requires 10 Bytes of stack space! (incl. ret ptr)
+;#############################################################################
+
+dump_regs:
+	push af
+	push bc
+	push de
+	push hl		;save everything here
+	push ix
+	
+	push iy
+		push ix
+		
+			push bc		; save bc again, for it shall be clobbered
+			
+				push af
+				call	iputs
+				db	'AF=',0
+				pop af
+				call hexdump_a
+			
+			call	iputs
+			db	', BC=',0
+			pop bc		; bring back bc
+			push bc		; save bc again, for it shall be clobbered
+			ld	a,b
+			call	hexdump_a
+			pop bc		; bring back bc yet again
+			ld a,c
+			call	hexdump_a
+
+		call	iputs
+		db	', IX=',0
+		pop bc	; pop former IX value
+		push bc
+		ld	a,b
+		call	hexdump_a
+		pop bc
+		ld a,c
+		call	hexdump_a
+
+	call	iputs
+	db	', IY=',0
+	pop bc	; pop former IY value
+	push bc
+	ld	a,b
+	call	hexdump_a
+	pop bc
+	ld a,c
+	call	hexdump_a
+
+	call	iputs
+	db	', DE=',0
+	ld	a,d
+	call	hexdump_a
+	ld a,e
+	call	hexdump_a
+
+	call	iputs
+	db	', HL=',0
+	ld	a,h
+	call	hexdump_a
+	ld a,l
+	call	hexdump_a
+
+	call puts_crlf
+
+	pop ix
+	pop hl
+	pop de
+	pop bc
+	pop af
+ret
+
+;#############################################################################
+; Print the last used DMA area
+; Clobber nothing, save everything
+; Beware: Requires 10 Bytes of stack space! (incl. ret ptr)
+;#############################################################################
+
+dumpdma:
+	push bc
+	push de
+	push hl		;save everything here
+
+	call	iputs
+	db	'DMA (',0
+    ld      a,(@dma+1)
+    call    hexdump_a
+    ld      a,(@dma)
+    call    hexdump_a
+	call	iputs
+	db	'): ',0
+	ld de,(@dma)	; start at @dma
+	ld hl,0
+	ld l,080h			; use L as counter
+.ddma_loop:
+	ld	a,l			; if %16 then
+	and	00fh
+	call z,puts_crlf
+
+	ld a,(de)		; load it
+	call hexdump_a	; dump it
+	call iputs
+	db	' ',0
+
+
+	inc de			; next byte
+	dec l			; count it
+	jr nz,.ddma_loop
+
+	call puts_crlf
+
+	pop hl
+	pop de
+	pop bc
+	ret
+
+dumpivars:
+	push bc
+	push de
+	push hl		;save everything here
+
+	call 	puts_crlf
+	; Lets first print all the vectors
+	call	iputs
+	db	'@civec=',0
+    ld      a,(@civec+1)
+    call    hexdump_a
+    ld      a,(@civec)
+    call    hexdump_a
+
+	call	iputs
+	db	' @covec=',0
+    ld      a,(@covec+1)
+    call    hexdump_a
+    ld      a,(@covec)
+    call    hexdump_a
+
+	call	iputs
+	db	' @dtbl=',0
+    ld      a,(@dtbl+1)
+    call    hexdump_a
+    ld      a,(@dtbl)
+    call    hexdump_a
+
+	call	iputs
+	db	' @mxtpa=',0
+    ld      a,(@mxtpa+1)
+    call    hexdump_a
+    ld      a,(@mxtpa)
+    call    hexdump_a
+
+	call	iputs
+	db	' @bnkbf=',0
+    ld      a,(@bnkbf+1)
+    call    hexdump_a
+    ld      a,(@bnkbf)
+    call    hexdump_a
+
+	call puts_crlf
+
+	call	iputs
+	db	'@crdma=',0
+    ld      a,(@crdma+1)
+    call    hexdump_a
+    ld      a,(@crdma)
+    call    hexdump_a
+
+	call	iputs
+	db	' @crdsk=',0
+    ld      a,(@crdsk)
+    call    hexdump_a
+
+	call	iputs
+	db	' @vinfo=',0
+    ld      a,(@vinfo+1)
+    call    hexdump_a
+    ld      a,(@vinfo)
+    call    hexdump_a
+
+	call	iputs
+	db	' @media=',0
+    ld      a,(@media)
+    call    hexdump_a
+
+	call	iputs
+	db	' @usrcd=',0
+    ld      a,(@usrcd)
+    call    hexdump_a
+
+	call puts_crlf
+
+	call	iputs
+	db	'@mltio=',0
+    ld      a,(@mltio)
+    call    hexdump_a
+
+	call	iputs
+	db	' @ermde=',0
+    ld      a,(@ermde)
+    call    hexdump_a
+
+	call	iputs
+	db	' @erdsk=',0
+    ld      a,(@erdsk)
+    call    hexdump_a
+
+	call	iputs
+	db	' @resel=',0
+    ld      a,(@resel)
+    call    hexdump_a
+
+	call	iputs
+	db	' @fx=',0
+    ld      a,(@fx)
+    call    hexdump_a
+
+	call	iputs
+	db	' @bflgs=',0
+    ld      a,(@bflgs)
+    call    hexdump_a
+
+	call puts_crlf
+	call puts_crlf
+
+	call	iputs
+	db	'@dma=',0
+    ld      a,(@dma+1)
+    call    hexdump_a
+    ld      a,(@dma)
+    call    hexdump_a
+
+	call	iputs
+	db	' @adrv=',0
+    ld      a,(@adrv)
+    call    hexdump_a
+
+	call	iputs
+	db	' @rdrv=',0
+    ld      a,(@rdrv)
+    call    hexdump_a
+
+	call	iputs
+	db	' @trk=',0
+    ld      a,(@trk+1)
+    call    hexdump_a
+    ld      a,(@trk)
+    call    hexdump_a
+
+	call	iputs
+	db	' @sect=',0
+    ld      a,(@sect+1)
+    call    hexdump_a
+    ld      a,(@sect)
+    call    hexdump_a
+
+	call	iputs
+	db	' @cnt=',0
+    ld      a,(@cnt)
+    call    hexdump_a
+
+	call	iputs
+	db	' @dbnk=',0
+    ld      a,(@dbnk)
+    call    hexdump_a
+
+	call	iputs
+	db	' @cbnk=',0
+    ld      a,(@cbnk)
+    call    hexdump_a
+
+	call puts_crlf
+
+	pop hl
+	pop de
+	pop bc
+	ret
+	
+	end
+	
