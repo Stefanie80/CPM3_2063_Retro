@@ -67,8 +67,7 @@ vdpfnt:	db 0h
 ;				 Destination is bank 1, 0x100 (The TPA)
 ;		C = 5 = Load/Save MBR
 ;			D = R/W flag (0=read,1=write)
-;				Buffer adress is hardcoded to 0x100
-;				For using this, your program needs to have "ORG 0200h"
+;				Buffer adress is hardcoded to 0x8000
 			
 ; 	B = 1 = VDP functions
 ;		C = 0 = Put Pixel
