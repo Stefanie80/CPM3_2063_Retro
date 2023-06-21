@@ -1,8 +1,10 @@
 r Tools\exit.z80
 r Tools\joys.z80
-r Tools\setcol.sub
+r Tools\setcol.z80
 r Tools\xmm.z80
 r Tools\xmms.z80
+r Tools\setpart.z80
+
 
 zmac xmm
 link xmm [op]
@@ -20,8 +22,12 @@ link joys
 zmac exit
 link exit
 
+zmac setpart
+link setpart
+
 w build\xmm.rsx b
 w build\xmms.com b
 w build\color.com b
 w build\joys.com b
 w build\exit.com b
+w build\setpart.com b

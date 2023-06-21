@@ -1,4 +1,4 @@
-org 0100h
+;org 0100h
 
 BDOS equ 5
 

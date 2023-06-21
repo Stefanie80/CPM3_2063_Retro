@@ -1,0 +1,337 @@
+; #######################################
+; #										#
+; #	 SD Card Active Partition Selector  #
+; #			for Z80 Retro!				#
+; #			by SolderGirl				#
+; #		based on SPI & SD code  		#
+; #			by John Winans				#
+; #										#
+; #######################################
+	
+	;ORG 0200h	; leave 512 bytes for the MBR
+	
+; Config Equates
+true	equ -1
+false	equ not true
+BDOS 	equ 5
+cr		equ 13
+lf		equ 10
+	
+	DSEG
+
+BIOSPB: 
+func:	db 30	; BIOS function no.
+areg: 	db 0 	; A register contents
+creg:	db 1 	; C register contents
+breg: 	db 0 	; B register contents
+dereg:	dw 0 	; DE register contents
+hlreg:	dw 0 	; HL register contents
+	
+opart: 	db 0
+	
+str_init: db cr,lf,'Partition Selector v0.1',cr,lf,0
+str_part: db cr,lf,'Partition #',0
+str_type: db ': Type=',0
+str_blks: db ' Size=',0
+str_actv: db ' *BOOT*',0
+str_newp: db cr,lf,'Change? (Y/N):',0
+str_chs0: db cr,lf,'Choose (',0
+str_chs1: db '):',0
+str_invl: db 'Out of Range!',cr,lf,0
+str_perr: db 'Error while loading MBR',cr,lf,0
+
+	CSEG
+	
+;############################################################################
+; A buffer for exchanging messages with the SD card.
+;############################################################################
+; 
+; MBR = Sector 0 from the SD Card
+; PTBL = Offset 0x01BE 		The first entry in the Table
+
+ld c,06Eh	; Set Delimiter
+ld de,0		; 0 byte
+call BDOS
+
+ld c,09h	; Print header
+ld de,str_init
+call BDOS	
+
+call .load	; read MBR at 0x100
+or a
+jp nz,.perror
+
+ld ix,081BEh	; IX -> PTBL
+;push ix
+
+;part1
+ld a,(ix+4)
+or a
+jr z,.p2		; If type is 00 then skip
+ld c,09h
+ld de,str_part
+call BDOS	
+ld c,02h
+ld e,'1'
+call BDOS
+ld c,09h
+ld de,str_type
+call BDOS	
+ld a,(ix+4)
+call hex
+ld a,(ix)
+or a
+jr z,.p2
+ld c,09h
+ld de,str_actv
+call BDOS	
+ld a,0
+ld (opart),a
+
+.p2:	
+;part2
+ld a,(ix+20)
+or a
+jr z,.p3		; If type is 00 then skip
+ld c,09h
+ld de,str_part
+call BDOS	
+ld c,02h
+ld e,'2'
+call BDOS
+ld c,09h
+ld de,str_type
+call BDOS	
+ld a,(ix+20)
+call hex
+ld a,(ix+16)
+or a
+jr z,.p3
+ld c,09h
+ld de,str_actv
+call BDOS	
+ld a,16
+ld (opart),a
+
+
+.p3:
+;part3
+ld a,(ix+36)
+or a
+jr z,.p4		; If type is 00 then skip
+ld c,09h
+ld de,str_part
+call BDOS	
+ld c,02h
+ld e,'3'
+call BDOS
+ld c,09h
+ld de,str_type
+call BDOS	
+ld a,(ix+36)
+call hex
+ld a,(ix+32)
+or a
+jr z,.p4
+ld c,09h
+ld de,str_actv
+call BDOS	
+ld a,32
+ld (opart),a
+
+
+.p4:
+;part4
+ld a,(ix+52)
+or a
+jr z,.pend		; If type is 00 then skip
+ld c,09h
+ld de,str_part
+call BDOS	
+ld c,02h
+ld e,'4'
+call BDOS
+ld c,09h
+ld de,str_type
+call BDOS	
+ld a,(ix+52)
+call hex
+ld a,(ix+48)
+or a
+jr z,.pend
+ld c,09h
+ld de,str_actv
+call BDOS	
+ld a,48
+ld (opart),a
+
+
+.pend:
+
+ld c,09h
+ld de,str_newp
+call BDOS	
+ld c,1
+call BDOS		; Get input
+cp 'y'
+jr z,.set
+cp 'Y'
+jr z,.set
+jp .end
+
+.set:
+ld c,09h
+ld de,str_chs0
+call BDOS	
+; determine and print available partitions
+ld a,(ix+4)
+or a
+jr z,.n1
+ld c,02h
+ld e,'1'
+call BDOS
+ld iy,1
+
+.n1:
+ld a,(ix+20)
+or a
+jr z,.n2
+ld c,02h
+ld e,','
+call BDOS
+ld c,02h
+ld e,'2'
+call BDOS
+ld iy,2
+
+.n2:
+ld a,(ix+36)
+or a
+jr z,.n3
+ld c,02h
+ld e,','
+call BDOS
+ld c,02h
+ld e,'3'
+call BDOS
+ld iy,3
+
+.n3:
+ld a,(ix+52)
+or a
+jr z,.n4
+ld c,02h
+ld e,','
+call BDOS
+ld c,02h
+ld e,'4'
+call BDOS
+ld iy,4
+
+.n4:
+ld c,09h
+ld de,str_chs1
+call BDOS	
+; ask for new partition
+ld c,1
+call BDOS		; Get input
+push af		; save the char
+sub 49		;
+jp m,.oor
+ld bc,49
+add iy,bc
+push iy
+pop bc		; C = chr('0'+max_part)
+pop af
+push af
+sub c
+jp p,.oor
+pop af
+sub 49		; A = new part
+ld e,a
+ld d,0
+ld c,16
+push ix
+.add:
+add ix,de
+dec c
+jr nz,.add
+; IX -> byte offset for new
+pop iy
+ld a,(opart)
+ld b,0
+ld c,a
+add iy,bc
+; IY -> byte offset for old
+
+; change PTBL in RAM
+ld a,0
+ld (iy),a
+ld a,080h
+ld (ix),a
+
+call .save		; Write new PTBL
+
+.end:
+jp 0
+
+.oor:
+	ld c,09h
+	ld de,str_invl
+	call BDOS	
+	jp .end
+	
+.load:
+	xor a
+	ld (breg),a
+	ld a,5
+	ld (creg),a
+	ld de,0
+	ld (dereg),de
+	ld c,032h
+	ld de,BIOSPB
+	call BDOS
+	ret
+
+.save:
+	xor a
+	ld (breg),a
+	ld a,5
+	ld (creg),a
+	ld de,0100h
+	ld (dereg),de
+	ld c,032h
+	ld de,BIOSPB
+	call BDOS
+	ret
+
+hex:
+	push af
+	srl	a
+	srl	a
+	srl	a
+	srl	a
+	call .hexdump_nib
+	pop	af
+	push af
+	and	00fh
+	call .hexdump_nib
+	pop	af
+	ret
+.hexdump_nib:
+	add	'0'
+	cp	'9'+1
+	jp	m,.hexdump_num
+	add	'A'-'9'-1
+.hexdump_num:
+	ld e,a
+	ld c,02h
+	jp BDOS
+
+.perror:
+	ld c,09h
+	ld de,str_perr
+	call BDOS	
+	
+	jp 0
+end

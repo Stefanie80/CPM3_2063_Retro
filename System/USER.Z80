@@ -13,8 +13,8 @@ joyport1	equ	0a9h	; I/O port for joystick 1
 	extrn	setbank,iputs,hexdump_a
 	extrn	@cbnk,@MXTPA
 	extrn 	curs0,curs1,isrflags
-	extrn 	vdp_cnt
-	
+	extrn 	vdp_cnt,loadmbr,savembr
+
 CSEG
 
 .xmem_base:
@@ -65,7 +65,11 @@ vdpfnt:	db 0h
 ;		C = 4 = Restore CCP
 ;				 Source is bank E, 0x0. Size is 0x1000 (4kB)
 ;				 Destination is bank 1, 0x100 (The TPA)
-
+;		C = 5 = Load/Save MBR
+;			D = R/W flag (0=read,1=write)
+;				Buffer adress is hardcoded to 0x100
+;				For using this, your program needs to have "ORG 0200h"
+			
 ; 	B = 1 = VDP functions
 ;		C = 0 = Put Pixel
 ;		C = 1 = Initialize VDP
@@ -120,6 +124,8 @@ usrfunc:
 	jp z,.mem_stccp	; C == 3
 	dec a
 	jp z,.mem_rlccp	; C == 4
+	dec a
+	jp z,.mbr		; C == 5
 	ret
 
 .vdp:
@@ -538,6 +544,22 @@ endif
 	; ld a,(isrflags)
 	; or 008h
 	; ld (isrflags),a
+	ret
+
+.mbr:
+	ld a,d
+	or a				
+	jr z,.mbr_load
+	dec a
+	jr z,.mbr_write
+	ret
+
+.mbr_load:
+	call loadmbr
+	ret
+
+.mbr_write:
+	call savembr
 	ret
 
 if VDP

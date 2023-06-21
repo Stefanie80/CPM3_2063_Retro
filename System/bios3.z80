@@ -990,6 +990,10 @@ vdp_cnt: db 3
 	;ld c,' '
 	;call vdp_char
 	ret
+	
+;###############################################
+; Print a character to VRAM
+;###############################################
 
 vdp_char:			; print char in C at coordinates in D:E
 	push bc			; save character
@@ -1056,6 +1060,16 @@ vdp_char:			; print char in C at coordinates in D:E
 	ld (vdp_esc),a
 	ret
 
+.term_fg:
+	xor a
+	ld (vdp_bg),a
+	ret
+	
+.term_bg:
+	ld a,1
+	ld (vdp_bg),a
+	ret
+
 ;###############################################
 ; Process ESC sequence
 ;###############################################
@@ -1069,10 +1083,15 @@ vdp_char:			; print char in C at coordinates in D:E
 	jr .term_xy
 .state0:	
 	ld a,c
-	cp '='
+	cp '='			; Load cursor position
 	jr z,.term_xy
-	cp 'G'
+	cp 'G'			; Set Video Attributes
 	jr z,.term_atr
+	cp '('			; Set Foreground mode
+	jr z,.term_fg
+	cp ')'			; Set Background mode
+	jr z,.term_bg
+	
 	;invalid control sequence
 	xor a
 	ld (vdp_state),a
@@ -1305,20 +1324,21 @@ curs_tick:
 ; Variables for VDP
 ;###############################################
 
-vdp_vram			equ	080h	; VDP port for accessing the VRAM
-vdp_reg				equ	081h	; VDP port for accessing the registers
-vdp_lines			equ 23
-vdp_cols			equ 40
-vdp_x:				db 0
-vdp_y:				db 0
-vdp_esc:			db 0
-vdp_state:			db 0
-vdp_rev:			db 0
-cursor:				db 0A0h;'_'
-curs0:				db '_' ;0A0h for block
-curs1:				db ' '
-c_tick:				dw 0
-c_mode:				db 1
+vdp_vram		equ	080h	; VDP port for accessing the VRAM
+vdp_reg			equ	081h	; VDP port for accessing the registers
+vdp_lines		equ 23
+vdp_cols		equ 40
+vdp_x:			db 0
+vdp_y:			db 0
+vdp_esc:		db 0
+vdp_state:		db 0
+vdp_rev:		db 0
+vdp_bg:			db 0
+cursor:			db 0A0h;'_'
+curs0:			db '_' ;0A0h for block
+curs1:			db ' '
+c_tick:			dw 0
+c_mode:			db 1
 
 
 endif

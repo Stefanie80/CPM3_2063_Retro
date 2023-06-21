@@ -47,7 +47,10 @@ gpio_in_sd_miso		equ	080h
 	; If you use any of these, do NOT use SDP0
 	public 	SD0, SD1, SD2, SD3, SD4, SD5, SD6, SD7, SD8, SD9, SD10, SD11
 	
-	
+	public loadmbr, savembr
+		loadmbr equ .load_ptbl
+		savembr equ .save_ptbl
+
 ; Local declarations	
 ;.dpbvec: dw	.dpb0,.dpb1,.dpb2,.dpb3,0
 
@@ -69,7 +72,7 @@ gpio_in_sd_miso		equ	080h
 ; and very little code in common.
 ; In the non-banked version, this is redundant and would waste 1/2k of precious RAM
 
-.sector_buffer equ 0100h
+.sector_buffer equ 08000h ;0100h
 ;	ds 512
 ;############################################################################
 ; A buffer for exchanging messages with the SD card.
@@ -2282,6 +2285,16 @@ if .mbr_msg > 0
 	ld a,1
 endif
 	jp .init_done
+
+.save_ptbl:
+	ld de,0
+	push de
+	push de			; load 0x00000000 for an address
+	ld de,.sector_buffer
+	call sd_cmd24
+	pop hl
+	pop hl	; fix stack
+	ret
 
 
 .load_ptbl:

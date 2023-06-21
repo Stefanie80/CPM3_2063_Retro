@@ -1,0 +1,4 @@
+r Tools\setpart.z80
+zmac setpart
+link setpart
+w build\setpart.com b
