@@ -61,6 +61,10 @@ spriteatr	equ 03B00h	; Sprite Attributes
 	extrn 	chrW,chrH,z80bmp,bmpH
 	
 	; The very first step must be:
+	; Select bank 0
+	ld	a,0fh
+	out	(gpio_out),a
+	
 	;  LDIR 64k
 	ld	hl,0
 	ld	de,0
@@ -68,6 +72,7 @@ spriteatr	equ 03B00h	; Sprite Attributes
 	ldir				; Copy all the code in the FLASH into RAM at same address.
 	; Disable the FLASH and run from SRAM only from this point on.
 	in	a,(070h)	; Dummy-read this port to disable the FLASH.
+
 
 .bios_boot:
 	; This will select low-bank 0, idle the SD card, and idle the printer
@@ -78,17 +83,21 @@ spriteatr	equ 03B00h	; Sprite Attributes
 	ld	sp,bios_stack		; use the private BIOS stack to get started
 	
 	call .init_console		; Init CTC & SIO
+
 if .debug > 0
 	call	iputs
 	db	cr,lf,'BOOT',cr, lf, 0
 	call	iputs
-	db	'Debug level 0x'0
+	db	'Debug level 0x',0
 	ld	a,.debug		; A = the current debug level
 	call	hexdump_a		; print the current level number
 	call	puts_crlf		; and a newline
 endif
 
+	ld d,0				; try 255 times
 	call vdp_init			; Init VDP
+	jp nz,.novdp
+	
 if .debug > 0
 	call	iputs
 	db	 'V', 0
@@ -96,6 +105,7 @@ endif
 
 	call prepfnt			; prepare patterns
 	call ldlogo
+
 if .debug > 0
 	call	iputs
 	db	 'D', 0
@@ -103,21 +113,26 @@ endif
 
 	call vdp_ldfnt			; Load Font
 	call vdp_ldcol			; Init Color Table
+
 if .debug > 0
 	call	iputs
 	db	 'P', 0
 endif
+
 	ld d,7
 	ld e,12
 	call .logo				; position shall be in D:E
 	call fill_screen		; Clear Nametable
+
 if .debug > 0
 	call	iputs
 	db	 '.',0
 endif
+
 	ld de,00F0Dh
 	ld hl,strng
 	call vdp_string			
+
 if .debug > 0
 	call	iputs
 	db 'done',cr,lf,0
@@ -127,7 +142,9 @@ if .debug > 0
 	call	iputs
 	db 'S',0
 endif
+.novdp:
 	call nc_init
+
 if .debug > 0
 	call	iputs
 	db 'D',0
@@ -179,6 +196,8 @@ endif
 	ld a,(p3flg)
 	cp 080h
 	jr z,.found
+	call iputs
+	db 'No active partition!',cr,lf,0
 	ld c,0FFh
 
 .found:		; C=active partition
@@ -221,6 +240,7 @@ endif
 	ld d,(iy+3)
 	ld iy,0C000h	; store the target
 	ld c,32
+	call .bootmsg
 	; load DE:HL with the partition base 
 	; then load 16k to 0xC000
 .nextblk:	
@@ -238,10 +258,14 @@ endif
 	pop		de
 	jr nc,.nocf
 	inc de
-.nocf:	
+.nocf:
+	call iputs
+	db '.',0
 	pop bc
 	dec c
 	jr nz,.nextblk
+	;call iputs
+	;db cr,lf,0
 	
 if .debug > 0
 	call iputs
@@ -258,6 +282,54 @@ endif
 	jp 0C000h
 
 	jp $ ; spin in place for debug
+
+.bootmsg:
+	; report the partition number and block address
+	; We MUST preserve ALL 16bit registers!
+	push 	bc
+	push	de
+	push	hl
+	push 	iy
+	push 	ix
+	
+	; Now, we push the ones we want to actually use again
+	push hl
+	push de	; de:hl have the block number
+	call iputs
+	db 'Booting P',0
+	ld a,(.bpar)
+	call hexdump_a
+	call iputs
+	db ': 0x',0
+
+	pop hl
+	push hl
+	ld a,h
+	call hexdump_a
+	pop hl
+	ld a,l
+	call hexdump_a
+	
+	; This prints what was in DE before
+	pop hl
+	push hl
+	ld a,h
+	call hexdump_a
+	pop hl
+	ld a,l
+	call hexdump_a
+	
+	; To round it all up:
+	call	puts_crlf	; a newline
+	
+	pop 	ix
+	pop 	iy
+	pop 	hl
+	pop 	de
+	pop 	bc
+	ret
+
+
 	
 	; At this point, the VDP should be in Mode 2 with ANSI Font loaded
 	; Lets display a logo in the upper 3rd of the screen
@@ -499,6 +571,35 @@ endif
 	ld	b,.vdpinit_len
 	ld	c,vdp_reg
 	otir				; write the config bytes
+	; Read the status register twice
+	; first read should reset the flags, 
+	; second read should return 0
+	in a,(c)
+	in a,(c)
+	jr z,.inidone
+	; The 'real' VDP should be ready at this point
+	; However a FPGA one could still be loading its firmware
+	; So, we try many times before giving up.
+	inc d
+	jr nz,vdp_init
+	call iputs
+	db 	'VDP not found',cr,lf,0
+	ld a,0FFh
+	ret
+.inidone:
+	; the D register has the number of tries it took
+	; to init the VDP. This may let us determine
+	; what kind of VDP we are dealing with.
+	push de
+	call iputs
+	db 'VDP 0x',0
+	pop de
+	ld a,d
+	call hexdump_a
+	call iputs
+	db ' found',cr,lf,0
+	
+
 	; Now, load font data
 	; Set the VRAM write address to 0
 	ld	a,0		; LSB
@@ -506,6 +607,7 @@ endif
 	call .vdp_del
 	ld	a,040h		; MSB
 	out	(vdp_reg),a
+	xor a
 	ret
 	
 vdp_ldfnt:

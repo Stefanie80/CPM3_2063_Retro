@@ -56,9 +56,8 @@
 ;############################################################################
 
 
-.sd_debug: equ 0
 
-;.sd_debug: equ 1
+.sd_debug: equ 0
 
 ;	equates for non graphic characters
 ;
