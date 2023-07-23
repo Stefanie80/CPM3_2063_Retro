@@ -35,8 +35,8 @@ gpio_in_sd_miso		equ	080h
 ; External variables/routines
 	extrn ?co,hexdmp,dump_regs,dumpdma,dumpivars, ?bank
 	extrn @dtbl,@dma,@trk,@sect,@adrv,@rdrv,@cbnk,@dbnk
-	extrn gpiocache,spamon,spamoff,puts,iputs,puts_crlf
-	
+	extrn gpiocache,puts,iputs,puts_crlf
+	;extrn spamon,spamoff
 	extrn disk_dump,dumpdpb,dumpdtbl,hexdump_a
 
 

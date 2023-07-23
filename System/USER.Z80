@@ -12,8 +12,10 @@ joyport1	equ	0a9h	; I/O port for joystick 1
 
 	extrn	setbank,iputs,hexdump_a
 	extrn	@cbnk,@MXTPA
-	extrn 	curs0,curs1,isrflags
-	extrn 	vdp_cnt,loadmbr,savembr
+if VDP
+	extrn 	vdp_cnt,curs0,curs1
+endif
+	extrn 	loadmbr,savembr,isrflags
 
 CSEG
 

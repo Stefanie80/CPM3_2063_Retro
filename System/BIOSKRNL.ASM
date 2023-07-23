@@ -69,8 +69,8 @@ ccp	equ 0100h	; Console Command Processor gets loaded into the TPA
 	public ?pmsg,?pdec	; print message, print number from 0 to 65535
 	public ?pderr		; print BIOS disk error message header
 
-	extrn dumpivars,spamon,spamoff,dumpregs,iputs,usrfunc
-	
+	extrn dumpivars,dumpregs,iputs,usrfunc
+	;extrn spamon,spamoff
 	maclib modebaud		; define mode bits
 
 
