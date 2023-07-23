@@ -35,7 +35,6 @@ colortbl	equ 02000h	; Color Table
 nametbl		equ 03800h	; Name Table
 spriteatr	equ 03B00h	; Sprite Attributes
 
-	ORG 0100h
 	CSEG
 
 	call .vdp_init		; initialize VDP
