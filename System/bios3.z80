@@ -11,7 +11,7 @@ false	equ not true
 banked	equ true
 .debug:		equ	0
 m_debug		equ 0
-VDP			equ 1
+VDP			equ 0
 VDP_font 	equ 0
 RTC_debug	equ 0
 
@@ -44,7 +44,7 @@ RTC_debug	equ 0
 ; These are all the publics from USER.Z80
 ;##########################################################################
 
-	extrn tickr0,tickr1,joy0,joy1,usrfunc
+	extrn usrfunc
 
 
 
@@ -125,8 +125,10 @@ CSEG
 	extrn hexdump_a, dumpdma, dump_regs, dumpivars
 
 	public setbank
+if VDP	
 	public curs0,curs1
-	
+endif	
+
 ; Z80 Retro Rev 3 IO port definitions
 
 gpio_in:		equ 000h		; GP input port
@@ -193,93 +195,245 @@ joyport1		equ	0a9h		; I/O port for joystick 1
 ;###############################################
 
 	public	@ctbl
+	
 @ctbl:
-	db 	'SIO-A '	; device 0, CRT port 0
-	db	0fh
-	db 	14
-	db 	'SIO-B '	; device 1, LPT port 0
-	db 	0fh
-	db 	14
+	db 	'SIO-A '	; device 0, 
+	db	0Fh
+	db 	14			; 14 -> 9600bps
+	db 	'SIO-B '	; device 1, 
+	db 	0Fh
+	db 	15			; 15 -> 19200bps (?)
 	db 	'PRN   '
 	db 	2			; 2 -> output only
 	db 	0			; 0 -> no baudrate
 if VDP
-	db 	'CRT   '
-	db 	2			; 2 -> output only
+	db 	'VDP   '
+	db 	3			; 2 -> output only
 	db 	0			; 0 -> no baudrate
-endif	
-	db	'NONE  '
+else	
+	db	'DUMMY '	; Dummy Device
 	db	3			; In+Out
 	db	0
+endif
 	db 	0			; table terminator
-					
+		
+@bdtbl:
+	db	0,0,0,0, 1,      2,     3,     192, 96,   64,   48,   32,   24,   16,   12,   6
+	;	0,0,0,0, 115200, 57600, 38400, 600, 1200, 1800, 2400, 3600, 4800, 7200, 9600, 19200
+	
 ;###############################################
 ; Interrupt service routines
 ;###############################################
 					
 public isrflags
+
 isrflags:
-	db 00h
+	db 03h 		; D0: J0 active, D1: J1 active, D2: J0 flag, D3: J1 flag
+joyv0:
+	db 00h		; most recent value from port
+	db 00h		; last reported value
+joyv1:
+	db 00h		; most recent value from port
+	db 00h		; last reported value
+tmp:
+	db 00h		; temporary storage for ISR
+
+;###############################################
+; Joystick Character Device
+;###############################################
+
+; We can do 8 directions + fire button.
+; However since many games will be expecting 4 cursor keys,
+; we definitely should support a 4 button mode as well.
+
+; Define two lists of bytes to return for Joysticks
+; These should be changeable by a USER function call
+	public j0keys,j1keys
+j0keys:	db '4','7','8','9','6','3','2','1','5','0' 	; Left,LeftUp,Up,UpRight,Right,RightDown,Down,LeftDown,Fire,Button2
+j1keys:	db '4','7','8','9','6','3','2','1','5','0' 	; Left,LeftUp,Up,UpRight,Right,RightDown,Down,LeftDown,Fire,Button2
+
+joy_rx_char:
+	call j0rdy
+	or a
+	jr z,joy_rx_char
+	call j0char
+	ret
+
+; check if j0 has changed since last read
+j0rdy:
+	ld a,(joyv0+1)	; former
+	ld b,a
+	in a,(joyport0)
+	cp b			; zero if no change
+	jr z,.noj0
+	ld b,a
+	
+	ld (joyv0),a
+	ret
+.noj0:
+	xor a
+	ret
+
+	ld a,(isrflags)
+	and 004h
+	ret z		; 0 = no char ready
+	ld a,0FFh	; FF = char ready
+	ret
+
+; check if j1 has changed since last read
+j1rdy:
+	ld a,(isrflags)
+	and 008h
+	ret z		; 0 = no char ready
+	ld a,0FFh	; FF = char ready
+	ret
+
+; return a char depending on j0	in A
+; D7=Up,D6=Down,D5=Right,D4=Btn2,D3=X,D2=Left,D1=X,D0=Fire
+j0char:
+	ld a,(joyv0+1)		; the former value
+	ld b,a
+	ld a,(joyv0)		; the current value
+	ld c,a
+	; check the buttons first
+	bit 0,c
+	jr nz,.nofire		; non-zero = not pressed
+	bit 0,b				; was it pressed before?
+	jr z,.nofire		; not changed
+		ld a,(j0keys+8)
+		jr .j0ret		; return fire button code
+.nofire:
+	bit 4,c
+	jr nz,.nobtn2		; non-zero = not pressed
+	bit 4,b				; was it pressed before?
+	jr z,.nobtn2		; not changed
+		ld a,(j0keys+9)
+		jr .j0ret		; return button 2 code
+.nobtn2:
+	; if we arrive here, examine D7,D6,D5,D2 
+	; and return the apropriate byte
+	bit 2,c
+	jr nz,.noleft
+	; left is pressed
+	bit 7,c		; Up?
+	jr nz,.noupleft
+	; return left+up 
+	ld a,(j0keys+1)
+	jr .j0ret
+.noupleft:
+	bit 6,c		; Down?
+	jr nz,.nodnleft
+	; return left+down
+	ld a,(j0keys+7)
+	jr .j0ret
+.nodnleft:
+	; return left
+	ld a,(j0keys)
+	jr .j0ret
+.noleft:
+	bit 5,c
+	jr nz,.noright
+	; right is pressed
+	bit 7,c		; Up?
+	jr nz,.noupright
+	; return right+up
+	ld a,(j0keys+3)
+	jr .j0ret
+.noupright:	
+	bit 6,c		; Down ?
+	jr nz,.nodnright
+	; return right+down
+	ld a,(j0keys+5)
+	jr .j0ret
+.nodnright:
+	; return right
+	ld a,(j0keys+4)
+	jr .j0ret
+.noright:
+	; if we make it to here, it can only be up,down, or nothing
+	; all diagonals are already accounted for
+	bit 7,c 	; Up ?
+	jr nz,.noup
+	; return up
+	ld a,(j0keys+2)
+	jr .j0ret
+.noup:	
+	bit 6,c		; down?
+	jr nz,.nodown
+	; return down
+	ld a,(j0keys+6)
+	jr .j0ret
+.nodown:
+	; not a single key/direction.
+	xor a	; return zero
+.j0ret:	
+	; save the current value as last reported one before returning
+	ld b,a	; save the return value
+	ld a,c 	; current value
+	ld (joyv0+1),a	; save as the new former
+	; reset the flag
+	ld a,(isrflags)
+	and 0FBh
+	ld (isrflags),a
+	ld a,b 	; return value in A
+	ret
+
+;###############################################
+; Timer 0 -> Joysticks
+;###############################################
 
 ctc0_isr:
-	; push af
-	; ;push bc
-	; ;push de
-	; push hl
-	; ld a,(isrflags)
-	; xor 080h
-	; ld (isrflags),a
-	; ; use bit 7 to branch into two subfunctions
-	; or 080h
-	; jr nz,.tick1
+	push af
+	push bc
+	;push de
+	;push hl
+
+	ld a,(isrflags)
+	and 001h
+	jr z,.jp2
+	; read joy0 here
 	
-; .tick0:
-	; ld a,(isrflags)
-	; and 001h
-	; jr z,.nojoy0
-	; ; read joy0 here
-	; in a,(joyport0)
-	; ld (joy0),a
-; .nojoy0:
-	; ld a,(isrflags)
-	; and 004h
-	; jr z,.isr_tail
-	; ; call ticker0 here
-	; ld hl,(tickr0)
-	; call .tailcall
-	; jr .isr_tail
+	ld a,(joyv0)		; get the old value
+	ld b,a
+	in a,(joyport0)		; get the new value
+	cp b		; changed?
+	jr z,.jp2
+	; changed, set a flag
+	ld a,(isrflags)
+	or 004h
+	ld (isrflags),a
+	; and save the new byte
+	ld (joyv0),a 
 
-; .tick1:
-	; ld a,(isrflags)
-	; and 002h
-	; jr z,.nojoy1
-	; ; read joy1 here
-	; in a,(joyport1)
-	; ld (joy1),a
-; .nojoy1:
-	; ld a,(isrflags)
-	; and 008h
-	; jr z,.isr_tail
-	; ; call ticker1 here
-	; ld hl,(tickr1)
-	; call .tailcall
+.jp2:
+	ld a,(isrflags)
+	and 002h
+	jr z,.isr_tail
+	; read joy1 here
 
-	; ld a,'.'
-	; ld c,a
-	; call con_tx_char
-; .isr_tail:
-	; pop hl
-	; ;pop de
-	; ;pop bc
-	; pop af
-	; ei
+	ld a,(joyv1)		; get the old value
+	ld b,a
+	in a,(joyport1)		; get the new value
+	cp b		; changed?
+	jr z,.isr_tail
+	; changed, set a flag
+	ld a,(isrflags)
+	or 008h
+	ld (isrflags),a
+	; and save the new byte
+	ld (joyv1),a
+
+.isr_tail:
+	;pop hl
+	;pop de
+	pop bc
+	pop af
+	ei
 	reti
 
-; .tailcall:
-	; jp (hl)
-
-
-
+;###############################################
+; Timer 3 -> RTC
+;###############################################
 
 rtc_irq_handler:
 	push af
@@ -302,14 +456,6 @@ endif
 	; store counter
 	ld (rtc_counter),a
 	
-	; flip LSB of time base.
-	ld a,(rtc_limit)
-	xor 01h
-	ld (rtc_limit),a
-		
-	;pop ix
-	;pop iy
-	;pop hl
 	pop bc
 	pop af
 	ei
@@ -325,6 +471,11 @@ if RTC_debug > 0
 	ld c,a
 	call con_tx_char
 endif	
+	; flip LSB of time base.
+	ld a,(rtc_limit)
+	xor 01h
+	ld (rtc_limit),a
+
 	ld a,(@sec)		;@sec byte / BCD
 	inc a
 	daa	
@@ -409,7 +560,16 @@ endif
 	ld a,c				; C= device number
 	or a
 	jr nz,.notsioa
-	ld	c,12			; C = 12 = 9600 bpst
+	; SIO-A init
+	;push af
+	; @ctbl+7
+	ld a,(@ctbl+7)
+	ld b,0
+	ld c,a
+	; @bdtbl
+	ld hl,@bdtbl
+	add hl,bc
+	ld	c,(hl)				; C=192=600bps, C=96=1200bps, C=48=2400bps, C=24=4800bps, C=12=9600bps, C=6=19200bps, C=3=38400, C=1=115200bps
 	call	init_ctc_1		; start CTC1 in case J11-A selects it!
 	call	sioa_init		; 115200 or 19200/9600 depending on J11-A
 	ret
@@ -417,14 +577,22 @@ endif
 	; C = 1
 	dec a
 	jr nz,.notsiob
-	ld	c,12			; C = 12 = 9600 bpst
-	call	init_ctc_2		; start CTC2 in case J11-A selects it!
+	; SIO-B init
+	ld a,(@ctbl+14)
+	ld b,0
+	ld c,a
+	; @bdtbl
+	ld hl,@bdtbl
+	add hl,bc
+	ld	c,(hl)				; C=192=600bps, C=96=1200bps, C=48=2400bps, C=24=4800bps, C=12=9600bps, C=6=19200bps, C=3=38400, C=1=115200bps
+	call	init_ctc_2		; start CTC2 in case J11-B selects it!
 	call	siob_init		; 115200 or 19200/9600 depending on J11-A
 	ret
 .notsiob:
 	; C = 2
 	dec a
 	jr nz,.notprn
+	; PRN init
 	call prn_init
 	ret
 .notprn:
@@ -432,9 +600,8 @@ endif
 	dec a
 	jr nz,.notvdp
 if VDP
-	;ld bc,0101h			; B=1=vdp,C=1=Init
-	;call usrfunc			; VDP init is done in the bootloader
-
+	ld bc,0101h			; B=1=vdp,C=1=Init
+	call usrfunc			; VDP init is done in the bootloader
 endif	
 	ret
 .notvdp:
@@ -450,6 +617,7 @@ endif
 
 ;###############################################
 ; Console Input
+; Input: B = Device Number
 ;###############################################
 
 ?ci:
@@ -458,11 +626,17 @@ endif
 	jp z,sioa_rx_char
 	dec a
 	jp z,siob_rx_char
+	dec a
+	jp z,.ci_ret ; no prn input
+	dec a
+	jp z,joy_rx_char
 	; other devices have no input
+.ci_ret:	
 	ret
 
 ;###############################################
 ; Console Output
+; Input: B = Device Number
 ;###############################################
 
 ?co:
@@ -481,6 +655,7 @@ endif
 
 ;###############################################
 ; Input status
+; Input: B = Device Number
 ;###############################################
 
 ?cist:
@@ -492,44 +667,56 @@ endif
 	ld a,b
 	or a
 	jr nz,.nota
-	call	sioa_rx_ready
+	call sioa_rx_ready
 	ret	z		; A = 0 = not ready
 	ld	a,0ffh
-	ret		; A = 0xff = ready
+	ret			; A = 0xff = ready
 .nota:
-	call	siob_rx_ready
+	dec b
+	jr nz,.notb
+	call siob_rx_ready
 	ret	z		; A = 0 = not ready
 	ld	a,0ffh
-	ret		; A = 0xff = ready
+	ret			; A = 0xff = ready
+.notb:
+	dec b
+	jr nz,.notpr
+	; printer has no input?
+	ret
+.notpr:
+	; this should be Joysticks
+	jp j0rdy
+	ret
 
 ;###############################################
 ; Output Status
+; Input: B = Device Number
 ;###############################################
 
 ?cost:
 	ld a,b
 	or a
 	jr nz,.ost1
-	call	sioa_tx_ready
+	call sioa_tx_ready
 	ret	z		; A = 0 = not ready
 	ld	a,0ffh
-	ret		; A = 0xff = ready
+	ret			; A = 0xff = ready
 .ost1:
 	dec a
 	jr nz,.ost2
-	call	siob_tx_ready
+	call siob_tx_ready
 	ret	z		; A = 0 = not ready
 	ld	a,0ffh
-	ret		; A = 0xff = ready
+	ret			; A = 0xff = ready
 .ost2:
 	dec a
 	jr nz,.ost3
 	call prn_stat
 	ret	z		; A = 0 = not ready
 	ld	a,0ffh
-	ret		; A = 0xff = ready
+	ret			; A = 0xff = ready
 .ost3:
-	;check VDP ready status
+	;check VDP ready status?
 	ret
 
 ; Drivers for the SIO
@@ -647,22 +834,25 @@ sioa_rx_char:
 
 ; Drivers for CTC
 
+	DSEG			
+
+;#############################################################################
+; CTC 0  
+;#############################################################################
+
+init_ctc_0:
+	ld	a,0b7h			; EI, timer mode, /256 prescale, TC follows, reset, ctl
+	out	(ctc_0),a
+	xor a				; 0=256 (as slow as it can go = system_clock_hz/256/256)
+	out	(ctc_0),a
+	ld hl,ctc0_isr
+	ld (IVTbase),hl		; load the ISR into the IVT
+	ret
+
 ;#############################################################################
 ; Init the bit-rate generator for SIO A.
 ; C = clock divisor
 ;#############################################################################
-
-	DSEG
-
-init_ctc_0:
-	; ld	a,0b7h			; EI, timer mode, /256 prescale, TC follows, reset, ctl
-	; out	(ctc_0),a
-	; xor a				; 0=256 (as slow as it can go = system_clock_hz/256/256)
-	; out	(ctc_0),a
-	; ld hl,ctc0_isr
-	; ld (IVTbase),hl	; load the ISR into the IVT
-	
-	ret
 
 init_ctc_1:
     ld      a,047h      ; TC follows, Counter, Control, Reset
@@ -854,7 +1044,7 @@ prn_out:
 	ret
 
 if VDP
-.debug_vdp:		equ 1
+.debug_vdp:		equ 0
 	
 .vdp_cr:		; Return to start of line
 	call vdp_curs

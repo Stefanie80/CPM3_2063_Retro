@@ -9,7 +9,8 @@ debug 	equ false
 	public	?init,?ldccp,?rlccp,?time
 	extrn	?pmsg,?conin
 	extrn	@civec,@covec,@aivec,@aovec,@lovec
-	extrn 	@cbnk,?bnksl,dumpivars,spamon,spamoff
+	extrn 	@cbnk,?bnksl,dumpivars
+	;extrn 	spamon,spamoff
 	extrn 	iputs,dumpregs,ictc3,ictc0,usrfunc
 
 	maclib ports
@@ -33,7 +34,7 @@ if debug
 	db '?INIT ',0
 endif
 	lxi h,08000h ! shld @civec 
-	lxi h,09000h ! shld @covec	; assign console to CRT:
+	lxi h,08000h ! shld @covec	; assign console to CRT:
 	lxi h,02000h ! shld @lovec 					; assign printer to LPT:
 	lxi h,04000h ! shld @aivec ! shld @aovec	; assign AUX to CRT1:
 	;call ictc0
