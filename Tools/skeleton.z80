@@ -1,0 +1,207 @@
+; #######################################
+; #										#
+; #	   Generic Skeleton Program         #
+; #			for CP/M Plus				#
+; #			by SolderGirl				#
+; #										#
+; #######################################
+
+; #######################################
+; #	EQU's are only used at compile time	#
+; #	Since they have no influence on		#
+; #	the size or speed of the program,	#
+; #	there is no reason to spare here	#
+; #######################################
+
+; Config Equates
+true	equ -1
+false	equ not true
+cr		equ 13
+lf		equ 10
+
+; #######################################
+; #	Equates for calling BDOS			#
+; #######################################
+BDOS 	equ 0005h	
+recbuf	equ 0080h
+deffcb	equ 005Ch
+	; BDOS function numbers
+BD_con_in		equ	1
+BD_con_out		equ	2
+BD_aux_in		equ	3
+BD_aux_out		equ	4
+BD_list_out		equ	5
+BD_direct_con	equ	6
+BD_aux_in_sta	equ	7
+BD_aux_out_sta	equ	8
+BD_print_string	equ	9
+BD_read_con_buf	equ	10
+BD_read_con_buf	equ	10
+BD_con_in_sta	equ	11
+BD_get_version	equ	12
+BD_disk_reset	equ	13
+BD_select_disk	equ	14
+BD_open_file	equ	15
+BD_close_file	equ	16
+BD_search_first	equ	17
+BD_search_next	equ	18
+BD_delete_file	equ	19
+BD_read_seq		equ	20
+BD_write_seq	equ	21
+BD_make_file	equ	22
+BD_rename_file	equ	23
+BD_login_vector	equ	24
+BD_current_disk	equ	25
+BD_set_dma		equ	26
+BD_alloc_vector	equ	27
+BD_write_prot	equ	28
+BD_ro_vector	equ	29
+BD_file_atribs	equ	30
+BD_get_DPB		equ	31
+BD_user_code	equ	32
+BD_read_random	equ	33
+BD_write_random	equ	34
+BD_comp_size	equ	35
+BD_set_record	equ	36
+BD_reset_drive	equ	37
+BD_access_drive	equ	38
+BD_free_drive	equ	39
+BD_write_w_fill	equ	40
+; 41 is MP/M only
+BD_lock_record	equ	42
+BD_unlock_rcrd	equ	43
+BD_multi_count	equ	44
+BD_error_mode	equ	45
+BD_dsk_free_spc	equ	46
+BD_chain_2_prgd	equ	47
+BD_flush_buffer	equ	48
+BD_access_SCB	equ	49
+BD_access_BIOS	equ	50
+; 51 .. 58 undocumented
+BD_load_overlay	equ	59
+BD_call_RSX		equ	60
+; 61 .. 97 undocumented
+BD_free_blocks	equ	98
+BD_trunc_file	equ	99
+BD_set_dir_lbl	equ	100
+BD_get_dir_lbl	equ	101
+BD_get_filemode	equ	102
+BD_write_XFCB	equ	103
+BD_set_date		equ	104
+BD_get_date		equ	105
+BD_set_password	equ	106
+BD_get_serial	equ	107
+BD_return_code	equ	108
+BD_console_mode	equ	109
+BD_output_delim	equ	110
+BD_print_block	equ	111
+BD_list_block	equ	112
+; 113 .. 151 undocumented
+BD_parse_filnm	equ	152
+
+; #######################################
+; #	The following data structures will	#
+; #	end up in the resulting .COM file.	#
+; #	You can comment out or delete the   #
+; #	ones you don't need to save a few 	#
+; #	precious bytes.						#
+; #######################################
+
+
+	; Start Data Segment
+	DSEG
+; #######################################
+; #	Data Structure for BIOS calls		#
+; #######################################
+BIOSPB: 	
+func:	db 30	; BIOS function no.
+areg: 	db 0 	; A register contents
+creg:	db 1 	; C register contents
+breg: 	db 0 	; B register contents
+dereg:	dw 0 	; DE register contents
+hlreg:	dw 0 	; HL register contents
+
+; #######################################
+; #	Data Structures for File operations	#
+; #######################################
+FCB:	; For almost all file access
+dr:		db 0	; drive code
+fname:	db 0,0,0,0,0,0,0,0 	; 8 Bytes Filename
+ftype:	db 0,0,0 	; 3 Bytes Filetype
+ext:	db 0 	; current extent
+s12:	db 0,0 	; reserved
+rc:		db 0	; record count
+d0n:	ds 15	; 15 Bytes reserved
+crec:	db 0 	; current record
+r0:		db 0,0,0; 3 Bytes, 18 bit record adress, LSB first.
+
+PFCB:	; For parsing filenames
+		dw .linebuf+2	; input string
+		dw deffcb		; FCB
+		
+
+; #######################################
+; #	String declarations					#
+; #######################################
+str_crlf: db cr,lf,0
+str_init: db cr,lf,'Program Title v0.1',cr,lf,0
+
+; #######################################
+; #	Stack and Buffers					#
+; #######################################
+.linebuf:ds 16
+.oldstk: ds 64
+.stack:	 dw 0
+
+
+	; Start Code Segment
+	CSEG
+; #######################################
+; #	Code start							#
+; #######################################
+
+	; Set up Stack:
+ld (.oldstk),sp
+ld sp,.stack
+
+	; Set up BDOS
+			; Use 0-terminated strings.
+ld c,BD_output_delim	; Set Delimiter
+ld de,0					; 0 byte
+call BDOS
+
+			; Don't abort on error
+ld c,BD_error_mode 		; Set Error Mode
+ld e,0FEh				; FE=Return&Display Mode,FF=Return (Silent) Mode
+call BDOS
+
+ld c,BD_print_string	; Print header
+ld de,str_init
+call BDOS	
+	; Insert actual program code here:
+	
+	
+	
+	; All done, clean up:
+jp .end
+; #######################################
+; #	Local subroutines go here:			#
+; #######################################
+
+
+
+
+; #######################################
+; #	Cleanup								#
+; #######################################
+.end:	
+push af
+ld c,09h	; Print newline
+ld de,str_crlf
+call BDOS	
+pop af
+;restore stack
+ld sp,(.oldstk)
+
+jp 0
+end
