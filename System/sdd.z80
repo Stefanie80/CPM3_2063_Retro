@@ -229,7 +229,7 @@ endif
     dw  64      ; fixed	SPT (8k per Track)
     db  6       ; fixed	BSH
     db  63      ; fixed	BLM
-    db  7       ; fixed	EXM
+    db  3       ; fixed	EXM
     dw  7FFFh   ; 		DSM (max allocation block number)
     dw  1023    ; fixed	DRM (max directory entries)
     db  0F0h    ; fixed AL0 (blocks for directory)
@@ -246,7 +246,7 @@ endif
     dw  64      ; fixed	SPT (8k per Track)
     db  6       ; fixed	BSH
     db  63      ; fixed	BLM
-    db  7       ; fixed	EXM
+    db  3       ; fixed	EXM
     dw  7FFFh   ; 		DSM (max allocation block number)
     dw  1023    ; fixed	DRM (max directory entries)
     db  0F0h    ; fixed AL0 (blocks for directory)
@@ -263,7 +263,7 @@ endif
     dw  64      ; fixed	SPT (8k per Track)
     db  6       ; fixed	BSH
     db  63      ; fixed	BLM
-    db  7       ; fixed	EXM
+    db  3       ; fixed	EXM
     dw  7FFFh   ; 		DSM (max allocation block number)
     dw  1023    ; fixed	DRM (max directory entries)
     db  0F0h    ; fixed AL0 (blocks for directory)
@@ -280,7 +280,7 @@ endif
     dw  64      ; fixed	SPT (8k per Track)
     db  6       ; fixed	BSH
     db  63      ; fixed	BLM
-    db  7       ; fixed	EXM
+    db  3       ; fixed	EXM
     dw  7FFFh   ; 		DSM (max allocation block number)
     dw  1023    ; fixed	DRM (max directory entries)
     db  0F0h    ; fixed AL0 (blocks for directory)
@@ -562,7 +562,7 @@ endif
     dw  64      ; fixed	SPT (8k per Track)
     db  6       ; fixed	BSH
     db  63      ; fixed	BLM
-    db  7       ; fixed	EXM
+    db  3       ; fixed	EXM
     dw  1021   ; 		DSM (max allocation block number)
     dw  511    ; fixed	DRM (max directory entries)
     db  0C0h    ; fixed AL0 (blocks for directory)
