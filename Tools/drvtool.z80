@@ -1,0 +1,1136 @@
+; #######################################
+; #										#
+; #	    	Drive Toolbox 	            #
+; #			for CP/M Plus				#
+; #			by SolderGirl				#
+; #										#
+; #######################################
+
+; #######################################
+; #	EQU's are only used at compile time	#
+; #	Since they have no influence on		#
+; #	the size or speed of the program,	#
+; #	there is no reason to spare here	#
+; #######################################
+
+; Config Equates
+loops	EQU	1024
+
+; System Equates
+true	equ -1
+false	equ not true
+cr		equ 13
+lf		equ 10
+
+debug 	equ false
+
+; #######################################
+; #	Equates for calling BDOS			#
+; #######################################
+BDOS 	equ 0005h	
+;recbuf	equ 0080h
+deffcb	equ 005Ch
+	; BDOS function numbers
+BD_con_in		equ	1
+BD_con_out		equ	2
+BD_aux_in		equ	3
+BD_aux_out		equ	4
+BD_list_out		equ	5
+BD_direct_con	equ	6
+BD_aux_in_sta	equ	7
+BD_aux_out_sta	equ	8
+BD_print_string	equ	9
+BD_read_con_buf	equ	10
+BD_read_con_buf	equ	10
+BD_con_in_sta	equ	11
+BD_get_version	equ	12
+BD_disk_reset	equ	13
+BD_select_disk	equ	14
+BD_open_file	equ	15
+BD_close_file	equ	16
+BD_search_first	equ	17
+BD_search_next	equ	18
+BD_delete_file	equ	19
+BD_read_seq		equ	20
+BD_write_seq	equ	21
+BD_make_file	equ	22
+BD_rename_file	equ	23
+BD_login_vector	equ	24
+BD_current_disk	equ	25
+BD_set_dma		equ	26
+BD_alloc_vector	equ	27
+BD_write_prot	equ	28
+BD_ro_vector	equ	29
+BD_file_atribs	equ	30
+BD_get_DPB		equ	31
+BD_user_code	equ	32
+BD_read_random	equ	33
+BD_write_random	equ	34
+BD_comp_size	equ	35
+BD_set_record	equ	36
+BD_reset_drive	equ	37
+BD_access_drive	equ	38
+BD_free_drive	equ	39
+BD_write_w_fill	equ	40
+; 41 is MP/M only
+BD_lock_record	equ	42
+BD_unlock_rcrd	equ	43
+BD_multi_count	equ	44
+BD_error_mode	equ	45
+BD_dsk_free_spc	equ	46
+BD_chain_2_prgd	equ	47
+BD_flush_buffer	equ	48
+BD_access_SCB	equ	49
+BD_access_BIOS	equ	50
+; 51 .. 58 undocumented
+BD_load_overlay	equ	59
+BD_call_RSX		equ	60
+; 61 .. 97 undocumented
+BD_free_blocks	equ	98
+BD_trunc_file	equ	99
+BD_set_dir_lbl	equ	100
+BD_get_dir_lbl	equ	101
+BD_get_filemode	equ	102
+BD_write_XFCB	equ	103
+BD_set_date		equ	104
+BD_get_date		equ	105
+BD_set_password	equ	106
+BD_get_serial	equ	107
+BD_return_code	equ	108
+BD_console_mode	equ	109
+BD_output_delim	equ	110
+BD_print_block	equ	111
+BD_list_block	equ	112
+; 113 .. 151 undocumented
+BD_parse_filnm	equ	152
+
+	; Start Code Segment
+	CSEG
+; #######################################
+; #	Code start							#
+; #######################################
+
+	; Set up Stack:
+ld (.oldstk),sp
+ld sp,.stack
+
+	; Set up BDOS
+			; Use 0-terminated strings.
+ld c,BD_output_delim	; Set Delimiter
+ld de,0					; 0 byte
+call BDOS
+
+			; Don't abort on error
+ld c,BD_error_mode 		; Set Error Mode
+ld e,0FFh				; FE=Return&Display Mode,FF=Return (Silent) Mode
+call BDOS
+
+ld c,BD_print_string	; Print header
+ld de,str_init
+call BDOS	
+
+; Evaluate command line
+
+
+; #######################################
+; #	Main Menu							#
+; #######################################
+
+ld c,BD_print_string 	; print menu
+ld de,str_menu
+call BDOS
+
+ld c,BD_con_in			; Get char from con
+call BDOS
+; char in A
+push af
+
+ld c,BD_print_string 	; newline
+ld de,str_crlf
+call BDOS
+
+pop af
+push af
+
+sub 48
+;or a
+jp z,.end		; In = '0'
+jp m,.end		; In < '0'
+sub 10
+jp p,.end		; In > '9'
+pop af
+sub 49
+jp z,read_boot	; In = 1
+dec a
+jp z,write_boot	; In = 2
+dec a
+jp z,wipe_dir	; In = 3
+dec a
+jp z,wipe_drv	; In = 4
+dec a
+jp z,read_bench	; In = 5
+dec a
+jp z,write_bench; In = 6
+
+jp .end
+
+
+; #######################################
+; #	Wipe Directory 						#
+; #######################################
+
+wipe_dir:
+	ld c,BD_print_string
+	ld de,str_wdir
+	call BDOS
+	
+	call getdrive
+	call getspace
+	; OFF = directory starts on sector 0 of this track
+	
+jp .end
+
+; #######################################
+; #	Wipe Drive  						#
+; #######################################
+
+wipe_drv:
+	ld c,BD_print_string
+	ld de,str_wdrv
+	call BDOS
+	
+	call getdrive
+	call getspace
+	; OFF = directory starts on sector 0 of this track
+	
+jp .end
+
+; #######################################
+; #	Read Boot Tracks					#
+; #######################################
+
+read_boot:
+	ld c,BD_print_string
+	ld de,str_svbt
+	call BDOS
+	
+call getdrive
+call getspace
+; at this point, we have the source drive,
+; and know the file size
+; get a Filename
+call getfile
+
+ld c,BD_print_string	; Print 'Reading ...'
+ld de,str_opn0
+call BDOS	
+
+ld a,(ressize+1)
+call hex
+ld a,(ressize+2)
+call hex
+ld a,(ressize+3)
+call hex
+
+ld c,BD_print_string	; Print 'Records'
+ld de,str_opn2
+call BDOS	
+
+ld c,BD_print_string	; Print 'Saving to ...'
+ld de,str_opn3
+call BDOS	
+
+ld c,BD_print_string	; Print filename
+ld de,deffcb+1
+call BDOS	
+
+ld c,BD_print_string	; Print newline
+ld de,str_crlf
+call BDOS	
+
+; Everything should be ready.
+; Try opening the file
+ld c,BD_make_file	; make file
+ld de,deffcb
+call BDOS
+; if *NOT* 0, then Error
+or a
+jp nz,.founerr
+
+ld bc,0			; sectors/track
+ld de,0			; tracks to go
+				; the DPB actually holds the number 
+				; of the track after the reserved
+				; tracks. So we decrement it here.
+ld hl,(off)		
+;dec hl
+ld (off),hl
+
+; Now, we need to read all the sectors
+; from all the system tracks and save
+; them to the specified file
+
+.sector_count: dw 0
+.track_count: dw 0
+
+.readloop:
+	ld c,02h		; print char
+	ld e,'.'
+	call BDOS
+
+if debug
+	ld bc,(.sector_count)
+	ld a,b
+	call hex
+	ld a,c
+	call hex
+	ld de,(.track_count)
+	ld a,d
+	call hex
+	ld a,e
+	call hex
+	ld c,BD_print_string	; Print newline
+	ld de,str_crlf
+	call BDOS	
+endif
+	
+	;set Track
+	ld de,(.track_count)
+	ld a,d
+	ld (breg),a
+	ld a,e
+	ld (creg),a
+	ld a,10
+	ld (func), a	; BIOS f. 10 = set Track
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+	
+	ld a,(rps)
+	ld d,0
+	ld e,a
+	ld bc,(.sector_count)
+	call BC_Div_DE	
+
+	;set Sector
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld c, 32h		; BIOS call
+	ld a,11
+	ld (func),a		; BIOS f. 11 = set Sector
+	ld de,BIOSPB
+	call BDOS
+
+	;set DMA
+	ld bc,recbuf
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld c, 32h		; BIOS call
+	ld a,12
+	ld (func),a		; BIOS f. 12 = set DMA
+	ld de,BIOSPB
+	call BDOS
+
+	;do read
+	ld c,BD_access_BIOS	; BIOS call
+	ld a,13
+	ld (func),a	; BIOS f. 13 = read Sector
+	ld de,BIOSPB
+	call BDOS
+
+	; Set BDOS DMA
+	ld c,BD_set_dma		; set DMA
+	ld de,recbuf
+	call BDOS
+
+	ld c,BD_multi_count
+	ld a,(rps)
+	ld e,a
+	call BDOS
+	
+	; Save to file
+	ld c,BD_write_seq 	; save record
+	ld de,deffcb
+	call BDOS
+
+	; count sector
+	ld bc,(.sector_count)
+	ld a,(rps)
+	ld h,0
+	ld l,a
+	add hl,bc
+	ld (.sector_count),hl
+	push hl
+	pop bc
+
+	;clear carry
+	call clcf
+
+	ld hl,(spt)
+	
+	sbc hl,bc
+	; if != 0, next sector
+	jp nz,.readloop
+
+	ld c,BD_print_string	; Print newline
+	ld de,str_crlf
+	call BDOS	
+
+	; else reset sector,
+	; and count Track
+	;ld a,(rps)
+	
+	ld bc,0
+	ld (.sector_count),bc
+	ld de,(.track_count)
+	inc de
+	ld (.track_count),de
+
+if 0;debug	
+	ld a,d
+	call hex
+	ld a,e
+	call hex
+endif
+	
+	; check track number
+	call clcf
+	ld hl,(off)
+	sbc hl,de
+jp nz,.readloop
+	; if zero, we are done
+.saved:
+; flush buffer
+ld c,BD_flush_buffer
+ld e,0FFh
+call BDOS
+; close file
+ld c,BD_close_file
+ld de,deffcb
+call BDOS
+
+if debug
+push HL
+call hex
+ld c,BD_con_out		; print char
+ld e,':'
+call BDOS
+pop HL
+push HL
+ld a,h
+call hex
+pop HL
+ld a,l
+call hex
+endif
+
+jp .end
+
+; #######################################
+; #	Write Boot Tracks					#
+; #######################################
+
+write_boot:
+	ld c,BD_print_string
+	ld de,str_wrbt
+	call BDOS
+	
+jp .end
+
+; #######################################
+; #	Test Read Speed 					#
+; #######################################
+
+read_bench:
+	ld c,BD_print_string
+	ld de,str_rtst
+	call BDOS
+	
+jp .end
+
+; #######################################
+; #	Test Write Speed					#
+; # 	TODO:							#
+; # 		Add Multi-Sector Test		#
+; #######################################
+
+write_bench:
+	ld c,BD_print_string
+	ld de,str_wtst
+	call BDOS
+
+	ld c,BD_print_string
+	ld de,str_prep
+	call BDOS
+	
+	; save current disk
+	ld c,BD_current_disk
+	call BDOS
+	ld (.seldrv),a
+
+	; Search for temp file
+	ld hl,str_ftmp
+	ld (PFCB),hl
+	ld c,BD_parse_filnm
+	ld de,PFCB
+	call BDOS
+	ld a,h
+	and l
+	cp 0FFh
+	jp z,.end
+	
+	; FCB should be ready, start Search
+	ld c,BD_search_first
+	ld de,deffcb
+	call BDOS
+	cp 0FFh
+	jp z,.notfound
+	
+	; If found, delete
+	ld c,BD_delete_file
+	ld de,deffcb
+	call BDOS
+	or h
+	jp nz,.end
+	
+.notfound:	
+	; Make temp file
+	ld c,BD_make_file
+	ld de,deffcb
+	call BDOS
+	or h
+	jp nz,.end
+
+	; prepare buffer
+	ld hl,recbuf
+	xor a
+	ld c,128
+	.prep:
+	ld (hl),a
+	inc hl
+	inc a
+	dec c
+	jr nz,.prep
+	
+	; Wait for a fresh second to start
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld (.tmpsec),a
+	;call hex
+	; We got the current second
+	; now add 11 and reformat the value
+	add 11h
+	daa 
+	ld (.endsec),a
+	;call hex
+	cp 60h			; check for minute boundary
+	jp c,.waitsec	; if carry, A was < 60
+	sub 60h
+	daa
+	ld (.endsec),a
+	;call hex
+
+.waitsec:	
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld hl,.tmpsec
+	cp (hl)
+	jp z,.waitsec
+	; We will arrive here right at the start of a fresh second.	
+	
+	
+	ld c,BD_print_string
+	ld de,str_writ
+	call BDOS
+	
+	; Count the number of records written
+	ld bc,0 		; number of records
+.writerec:
+	push bc
+	; write record
+	ld c,BD_write_seq
+	ld de,deffcb
+	call BDOS
+	or a
+	jp nz,.end
+	
+	pop bc
+	inc bc
+	push bc
+
+	; check the time
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld hl,.endsec
+	cp (hl)
+	;call hex
+	pop bc
+	jp nz,.writerec
+	
+	push bc
+
+	; flush buffer
+	ld c,BD_flush_buffer
+	ld e,0FFh
+	call BDOS
+		
+	ld c,BD_select_disk
+	ld a,(.seldrv)
+	ld e,a
+	call BDOS
+	
+	; Close File
+	ld c,BD_close_file
+	ld de,deffcb
+	call BDOS
+	
+	; Print the results
+	ld c,BD_print_string
+	ld de,str_recs
+	call BDOS
+	
+	pop bc
+	ld (.wrseq),bc
+	ld a,b
+	call hex
+	ld a,c
+	call hex
+	
+	ld c,BD_print_string
+	ld de,str_secs
+	call BDOS
+	
+	jp .end
+
+
+	
+	; All done, clean up:
+jp .end
+; #######################################
+; #	Local subroutines go here:			#
+; #######################################
+
+getfile:
+	ld c,09h	; Print question
+	ld de,str_filn
+	call BDOS	
+
+	; clear buffer
+	ld c,16
+	ld hl,.linebuf
+	xor a
+	.clr:
+	ld (hl),a
+	dec c
+	jr nz,.clr
+
+	; prepare buffer
+	ld a,14
+	ld (.linebuf),a
+	ld a,0
+	ld (.linebuf+15),a
+	
+	ld c,0Ah	; get input line
+	ld de,.linebuf
+	call BDOS
+	
+	ld c,09h	; Print newline
+	ld de,str_crlf
+	call BDOS	
+
+	ld c,98h	; parse filename
+	ld de,PFCB
+	call BDOS
+	
+	ret
+
+; #######################################
+; #	Get source/target drive				#
+; #  Determines available drives 		#
+; #  Ask user for a choice				#
+; #  Return selected drive in A 		#
+; #######################################
+
+getdrive:
+	ld c,09h	; Print newline
+	ld de,str_sdrv
+	call BDOS	
+
+	ld c,019h	; get current disk
+	call BDOS
+	push af		; current disk in A, save it
+
+	ld b,15
+.scannext:
+	push bc
+	ld c,0Eh	; select disk
+	ld e,b
+	call BDOS
+	ld b,a		; save error code
+	ld hl,drives
+	ld d,0		; E is set to selected disk
+	add hl,de	; Index into local table
+	ld (hl),b
+	pop bc
+	dec b
+	jr nz,.scannext
+	; at this point,'drives' contains 00 for each valid drive, FF for invalid ones
+
+	pop af		; restore former disk
+	ld e,a
+	ld c,00Eh	; select disk
+	call BDOS
+	; Now that we know which drives are available,
+	; present a choice to the user.
+
+	ld c,09h	; Print string
+	ld de,str_drv0
+	call BDOS	
+
+	ld c,0
+.prnnxt:
+	push bc
+	ld e,c
+	ld d,0
+	ld hl,drives
+	add hl,de
+	ld a,(hl)
+	or a
+	jr nz,.dontprn
+	pop bc
+	push bc
+	ld a,c
+	add a,'A'
+	ld e,a
+	ld c,02h	; Print character
+	call BDOS	
+
+	ld c,02h	; Print character
+	ld e,':'
+	call BDOS	
+
+	ld c,02h	; Print character
+	ld e,' '
+	call BDOS
+		
+.dontprn:
+	pop bc
+	inc c
+	ld a,c
+	cp 16
+	jp nz,.prnnxt
+
+	ld c,09h	; Print question
+	ld de,str_drv1
+	call BDOS	
+
+	ld c,01h	; Get Character in A
+	call BDOS	
+	
+	; Evaluate A to see if it corresponds to a valid drive
+	push af
+
+	sub 071h	; 70 = 'p'
+	jp p,.drvinval
+	
+	pop af
+	push af
+	sub 'A'
+	jp m,.drvinval
+	; If we get here, the char is in between 'A' and 'p'
+	pop af
+	push af
+	sub 'a'
+	jp m,.notlower
+	pop af
+	sub 20h
+	push af
+.notlower:	
+	sub 'Q'
+	jp p,.drvinval
+	; If we get here, we have a valid letter between A and P
+	pop af
+	sub 'A'
+	push af
+	ld d,0
+	ld e,a
+	ld hl,drives
+	add hl,de
+	ld a,(hl)
+	or a
+	jp nz,.drvinval
+	pop af
+	; Return with valid drive code in A
+	ld (drive),a
+ret
+
+getspace:
+	ld a,(drive)
+	ld c,0Eh	; select disk
+	ld e,a
+	call BDOS
+
+	ld c,01Fh	; Get DPB pointer
+	call BDOS
+
+	push hl
+	push hl
+	ld c,09h	; Print DPB addr
+	ld de,str_dpba
+	call BDOS	
+	pop hl
+
+	push hl
+	ld a,h
+	call hex
+	pop hl
+	ld a,l
+	call hex
+	ld c,09h	; Print newline
+	ld de,str_crlf
+	call BDOS	
+
+	pop ix		; DPB pointer now in IX
+	ld c,09h	; Print SPT
+	ld de,str_dspt
+	call BDOS	
+	ld a,(ix+1)
+	ld (spt+1),a
+	call hex
+	ld a,(ix)
+	ld (spt),a
+	call hex
+	
+	ld c,09h	; Print OFF
+	ld de,str_doff
+	call BDOS	
+	ld a,(ix+14)
+	ld (off+1),a
+	call hex
+	ld a,(ix+13)
+	ld (off),a
+	call hex
+
+	; Print physical sector size
+	ld c,09h	; Print PHM+1
+	ld de,str_psec
+	call BDOS	
+	ld a,(ix+16)
+	inc a
+	ld (rps),a
+	call hex
+	ld c,09h	; Print crlf
+	ld de,str_crlf
+	call BDOS	
+
+	; calculate size
+	ld b,(ix+1)
+	ld c,(ix)
+	ld d,(ix+14)
+	ld e,(ix+13)
+	call mul16
+	; DE:HL should be the number of reserved records.
+	ld a,d
+	ld (ressize),a
+	ld a,e
+	ld (ressize+1),a
+	ld a,h
+	ld (ressize+2),a
+	ld a,l
+	ld (ressize+3),a
+	
+ret	
+
+
+subint32:
+; Input: (DE) - (HL) 
+; Output: (BC)
+    ld a,(de)
+	sub (hl)
+	jp m,.oflow 
+	ld (bc),a
+	inc hl
+	inc de
+	inc bc
+    ld a,(de)
+	sbc a,(hl)
+	jp m,.oflow
+	ld (bc),a
+	inc hl
+	inc de
+	inc bc
+    ld a,(de)
+	sbc a,(hl)
+	jp m,.oflow
+	ld (bc),a
+	inc hl
+	inc de
+	inc bc
+    ld a,(de)
+	sbc a,(hl)
+	jp m,.oflow
+	ld (bc),a
+	xor a
+	jr .subret
+.oflow:
+	ld a,0FFh
+.subret:	
+ret
+
+mul16:
+	;Inputs:
+	;     DE and BC are factors
+	;Outputs:
+	;     A is 0
+	;     BC is not changed
+	;     DE:HL is the product
+	;902cc~1206cc, avg=1050cc
+	;20 bytes
+	ld hl,0
+	ld a,16
+Mul_Loop_1:
+	add hl,hl
+	rl e 
+	rl d
+	jr nc,$+6
+	add hl,bc
+	jr nc,$+3
+	inc de
+	dec a
+	jr nz,Mul_Loop_1
+ret
+
+BC_Div_DE:
+;BC/DE ==> BC, remainder in HL
+;1382cc
+;23 bytes
+
+  ld hl,0    ;Accumulator
+  ld a,16    ;Loop counter
+
+div_loop:
+  ;shift the bits from BC (numerator) into HL (accumulator)
+  sla c 
+  rl b
+  adc hl,hl
+
+  ;Check if remainder >= denominator (HL>=DE)
+  sbc hl,de
+  jr c,div_loop_readjust
+  inc c
+  jr div_loop_done
+
+div_loop_readjust:
+; remainder is not >= denominator, so we have to add DE back to HL
+  add hl,de
+
+div_loop_done:
+  dec a
+  jr nz,div_loop
+  ret
+
+hex:
+	push bc
+	push de
+	push hl
+
+	push af
+	srl	a
+	srl	a
+	srl	a
+	srl	a
+	call .hexdump_nib
+	pop	af
+	push af
+	and	00fh
+	call .hexdump_nib
+	pop	af
+	
+	pop hl
+	pop de
+	pop bc
+	ret
+.hexdump_nib:
+	add	'0'
+	cp	'9'+1
+	jp	m,.hexdump_num
+	add	'A'-'9'-1
+.hexdump_num:
+	ld e,a
+	ld c,02h
+	jp BDOS
+
+clcf:
+scf
+ccf
+ret
+
+.nofile:
+ld c,09h	; Print file name
+ld de,deffcb+1
+call BDOS	
+ld c,09h	; Print error message
+ld de,str_nfnd
+call BDOS	
+jr .end
+
+.founerr:
+ld c,09h	; Print error message
+ld de,str_fner
+call BDOS
+jr .end
+
+.toobig:
+ld c,09h	; Print error message
+ld de,str_2big
+call BDOS
+jr .end
+
+.fileinval:
+ld c,09h	; Print error message
+ld de,str_finv
+call BDOS
+jr .end
+
+.drvinval:
+ld c,09h	; Print error message
+ld de,str_invl
+call BDOS	
+jr .end
+
+
+; #######################################
+; #	Cleanup								#
+; #######################################
+.end:	
+push af
+ld c,09h	; Print newline
+ld de,str_crlf
+call BDOS	
+pop af
+;restore stack
+ld sp,(.oldstk)
+jp 0
+
+; #######################################
+; #	The following data structures will	#
+; #	end up in the resulting .COM file.	#
+; #	You can comment out or delete the   #
+; #	ones you don't need to save a few 	#
+; #	precious bytes.						#
+; #######################################
+
+
+	; Start Data Segment
+	DSEG
+; #######################################
+; #	Data Structure for BIOS calls		#
+; #######################################
+BIOSPB: 	
+func:	db 30	; BIOS function no.
+areg: 	db 0 	; A register contents
+creg:	db 1 	; C register contents
+breg: 	db 0 	; B register contents
+dereg:	dw 0 	; DE register contents
+hlreg:	dw 0 	; HL register contents
+
+; #######################################
+; #	Data Structures for File operations	#
+; #######################################
+FCB:	; For almost all file access
+dr:		db 0	; drive code
+fname:	db 0,0,0,0,0,0,0,0 	; 8 Bytes Filename
+ftype:	db 0,0,0 	; 3 Bytes Filetype
+ext:	db 0 	; current extent
+s12:	db 0,0 	; reserved
+rc:		db 0	; record count
+d0n:	ds 15	; 15 Bytes reserved
+crec:	db 0 	; current record
+r0:		db 0,0,0; 3 Bytes, 18 bit record adress, LSB first.
+
+PFCB:	; For parsing filenames
+		dw .linebuf+2	; input string
+		dw deffcb		; FCB
+		
+
+; #######################################
+; #	String declarations					#
+; #######################################
+str_crlf: db cr,lf,0
+str_init: db cr,lf,'Drive Toolbox wip0.1',cr,lf,lf,0
+str_prep: db 'Preparing...',cr,lf,0
+str_writ: db 'Writing...',cr,lf,0
+str_read: db 'Reading...',cr,lf,0
+str_ftmp: db 'TEMP.TMP ',0
+str_recs: db 'Records written: ',0
+str_secs: db ' in 10 seconds',cr,lf,0
+str_menu: db '  Main Menu',cr,lf,lf
+		  db '1 - Save Boot Tracks to File',cr,lf
+		  db '2 - Write File to Boot Tracks',cr,lf
+		  db '3 - Wipe Directory',cr,lf
+		  db '4 - Wipe Drive',cr,lf
+		  db '5 - Test Read Speed',cr,lf
+		  db '6 - Test Write Speed',cr,lf,lf
+		  db '0 - Quit',cr,lf,lf
+		  db 'Choose Operation: ',0
+str_wtst: db 'Write Speed Test',cr,lf,lf,0
+str_rtst: db 'Read Speed Test',cr,lf,lf,0
+str_svbt: db 'Save Boot Tracks',cr,lf,lf,0
+str_wrbt: db 'Write Boot Tracks',cr,lf,lf,0
+str_wdir: db 'Wipe Directory',cr,lf,lf,0
+str_wdrv: db 'Wipe Drive',cr,lf,lf,0
+
+str_opn0: db 'Reading 0x',0
+str_opn1: db ' Records from ',0
+str_opn2: db ' Records',cr,lf,0
+str_opn3: db 'Saving to ',0
+str_drv0: db 'Available Drives:',cr,lf,0
+str_drv1: db cr,lf,'Select Drive: ',0
+str_perr: db 'Error!',cr,lf,0
+str_nfnd: db ' not found!',cr,lf,0
+str_invl: db cr,lf,'Invalid Drive!',cr,lf,0
+str_dpba: db cr,lf,lf,'DPB @ 0x',0
+str_dspt: db 'Records/Track : 0x',0
+str_doff: db cr,lf,'System Tracks : 0x',0
+str_rres: db cr,lf,'Res. Records: 0x',0
+str_rfil: db 'File Records: 0x',0
+str_2big: db 'File too big!',cr,lf,0
+str_filn: db cr,lf,'Enter Filename: ',0
+str_finv: db cr,lf,'Invalid Filename!',cr,lf,0
+str_fner: db 'File exists, aborting!',cr,lf,0
+str_sdrv: db 'Scanning drives...',cr,lf,0
+str_psec: db cr,lf,'Records/Sector: 0x',0
+
+
+; #######################################
+; #	Stack and Buffers					#
+; #######################################
+drives:	  ds 16	; Flag drives
+drive:	  db 0 	; selected drive
+spt:	  dw 0
+off:	  dw 0
+psh:	  db 0
+rps:	  db 0
+fsize:    ds 4	; 4 bytes for the file size
+ressize:  ds 4 	; 4 bytes for the offset size
+tmp:	  ds 4  ; 4 bytes buffer
+.wrseq:  dw 0
+.rdseq:  dw 0
+.wrblk:  dw 0
+.rsblk:  dw 0
+.seldrv: db 0
+.tmpsec: db 0
+.endsec: db 0
+.linebuf:ds 16
+.oldstk: ds 128
+.stack:	 dw 0
+
+recbuf equ $
+end
