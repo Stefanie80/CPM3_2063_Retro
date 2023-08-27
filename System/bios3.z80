@@ -563,9 +563,9 @@ endif
 	; SIO-A init
 	;push af
 	; @ctbl+7
-	ld a,(@ctbl+7)
+	ld a,(@ctbl+7)			; Get Baudrate for Device 0
 	ld b,0
-	ld c,a
+	ld c,a					; make 16bit value
 	; @bdtbl
 	ld hl,@bdtbl
 	add hl,bc
@@ -578,9 +578,9 @@ endif
 	dec a
 	jr nz,.notsiob
 	; SIO-B init
-	ld a,(@ctbl+14)
+	ld a,(@ctbl+14)			; Get Baudrate for Device 1
 	ld b,0
-	ld c,a
+	ld c,a					; make 16bit value
 	; @bdtbl
 	ld hl,@bdtbl
 	add hl,bc
