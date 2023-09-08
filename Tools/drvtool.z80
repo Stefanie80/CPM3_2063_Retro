@@ -28,7 +28,6 @@ debug 	equ false
 ; #	Equates for calling BDOS			#
 ; #######################################
 BDOS 	equ 0005h	
-;recbuf	equ 0080h
 deffcb	equ 005Ch
 	; BDOS function numbers
 BD_con_in		equ	1
@@ -202,6 +201,201 @@ wipe_drv:
 	call getdrive
 	call getspace
 	; OFF = directory starts on sector 0 of this track
+	
+	; prepare a dummy sector
+	ld hl,recbuf
+	ld b,128
+	ld a,0E5h
+	; 128 x E5h
+	ld a,(rps)
+	push af
+	
+.preploop:
+	ld a,0E5h
+	ld (hl),a
+	inc hl
+	djnz .preploop
+	ld b,128
+	pop af
+	call hex
+	dec a
+	push af
+	jr nz,.preploop
+	pop af
+	; start at track 0 sector 0
+	
+	
+		;set Track
+	ld a,0
+	ld (breg),a
+	ld (creg),a
+	ld a,10
+	ld (func), a	; BIOS f. 10 = set Track
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+	
+	;set Sector
+	ld a,0
+	ld (breg),a
+	ld (creg),a
+	ld a,11
+	ld (func),a		; BIOS f. 11 = set Sector
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+
+	;set DMA
+	ld bc,recbuf
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,12
+	ld (func),a		; BIOS f. 12 = set DMA
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+
+	ld bc,0
+	ld (.scount),bc
+	ld (.tcount),bc
+	xor a
+	ld (.rcount),a
+
+.writeloop:
+	
+	ld bc,(.scount)
+	;set Sector
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,11
+	ld (func),a		; BIOS f. 11 = set Sector
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+
+		;set Track
+	ld bc,(.tcount)
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,10
+	ld (func), a	; BIOS f. 10 = set Track
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+
+	;set DMA
+	ld bc,recbuf
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,12
+	ld (func),a		; BIOS f. 12 = set DMA
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+
+	; write sector
+	ld a,0
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,14			; write sector
+	ld (func),a		; BIOS f. 14 = write Sector
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+	call BDOS
+	
+	;check input
+	ld c,BD_con_in_sta
+	call BDOS
+	or a
+	jr z,.nokey
+
+	ld c,BD_con_in
+	call BDOS
+	
+	cp 3
+	jp z,.end
+
+.nokey:	
+	
+	; increment sector counter
+	ld bc,(.scount)
+	inc bc
+	ld (.scount),bc
+	; check if end of track
+	ld hl,(spt)
+	scf
+	ccf
+	sbc hl,bc
+	; if hl==0, next track
+	ld a,h
+	or l
+	jr nz,.goon
+	ld bc,0
+	ld (.scount),bc
+	ld bc,(.tcount)
+	inc BC
+	ld (.tcount),bc
+	push bc
+	ld c, BD_con_out
+	ld e,':'
+	call BDOS
+	pop bc	
+	ld a,b
+	call hex
+	ld a,c
+	call hex
+	
+.goon:	
+	; increment record counter
+	ld hl,.rcount
+	ld a,blm
+	cp (hl)
+	jp z,.cntblk	
+	inc (hl)
+	jp .writeloop
+
+.cntblk:
+	ld (hl),0
+	ld bc,(.bcount)
+	inc bc
+	ld (.bcount),bc
+	ld hl,(dsm)
+	scf
+	ccf
+	sbc hl,bc
+	ld a,h
+	or l
+	jp nz,.writeloop
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	; write (DSM) times the sector
+	; BLM*128
+	; DSM = number of blocks
+	; Take BSH as counter
+	; start at 16384 and half (rot. ri.) at each step
+	; count down to 3
+	; count sectors up to SPT
+	; inc track
+	; counting up track/sector numbers
 	
 jp .end
 
@@ -845,6 +1039,13 @@ getspace:
 	ld (ressize+2),a
 	ld a,l
 	ld (ressize+3),a
+
+	ld a,(ix+3)
+	ld (blm),a
+
+	ld a,(ix+5)
+	ld (dsm),a
+
 	
 ret	
 
@@ -1118,9 +1319,16 @@ spt:	  dw 0
 off:	  dw 0
 psh:	  db 0
 rps:	  db 0
+blm:	  db 0
+dsm:	  dw 0
 fsize:    ds 4	; 4 bytes for the file size
 ressize:  ds 4 	; 4 bytes for the offset size
 tmp:	  ds 4  ; 4 bytes buffer
+.scount: dw 0
+.sscount: dw 0
+.rcount: db 0
+.bcount: dw 0
+.tcount: dw 0
 .wrseq:  dw 0
 .rdseq:  dw 0
 .wrblk:  dw 0
