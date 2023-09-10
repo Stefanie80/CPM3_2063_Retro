@@ -6,28 +6,18 @@
 ; #										#
 ; #######################################
 
-; #######################################
-; #	EQU's are only used at compile time	#
-; #	Since they have no influence on		#
-; #	the size or speed of the program,	#
-; #	there is no reason to spare here	#
-; #######################################
-
-; Config Equates
-loops	EQU	1024
-
 ; System Equates
 true	equ -1
 false	equ not true
 cr		equ 13
 lf		equ 10
-
+; Config Equates
 debug 	equ false
 
 ; #######################################
 ; #	Equates for calling BDOS			#
 ; #######################################
-BDOS 	equ 0005h	
+BDOS 	equ 0005h
 deffcb	equ 005Ch
 	; BDOS function numbers
 BD_con_in		equ	1
@@ -124,9 +114,10 @@ ld c,BD_error_mode 		; Set Error Mode
 ld e,0FFh				; FE=Return&Display Mode,FF=Return (Silent) Mode
 call BDOS
 
-ld c,BD_print_string	; Print header
+; Print header
 ld de,str_init
-call BDOS	
+call printstr
+
 
 ; Evaluate command line
 
@@ -134,26 +125,26 @@ call BDOS
 ; #######################################
 ; #	Main Menu							#
 ; #######################################
-
-ld c,BD_print_string 	; print menu
-ld de,str_menu
+mainmenu:
+ld c,BD_multi_count
+ld e,1
 call BDOS
+
+; print menu
+ld de,str_menu
+call printstr
 
 ld c,BD_con_in			; Get char from con
 call BDOS
 ; char in A
 push af
-
-ld c,BD_print_string 	; newline
 ld de,str_crlf
-call BDOS
-
+call printstr
 pop af
 push af
-
 sub 48
 ;or a
-jp z,.end		; In = '0'
+jr z,.endc		; In = '0'
 jp m,.end		; In < '0'
 sub 10
 jp p,.end		; In > '9'
@@ -171,91 +162,123 @@ jp z,read_bench	; In = 5
 dec a
 jp z,write_bench; In = 6
 
+.endc:
+xor a
 jp .end
 
 
 ; #######################################
 ; #	Wipe Directory 						#
 ; #######################################
-
 wipe_dir:
-	ld c,BD_print_string
 	ld de,str_wdir
-	call BDOS
-	
+	call printstr
+
 	call getdrive
 	call getspace
+	call prepsect
 	; OFF = directory starts on sector 0 of this track
-	
-jp .end
+	ld bc,(off)
+	dec bc
+	ld (.tcount),bc		; count Tracks
+	ld bc,0
+	ld (.scount),bc		; count Sectors
+	ld (.sscount),bc	; count Sectors twice
+	ld (.bcount),bc		; count Blocks
+	; we have to count blocks here
+	; (dirblk)
+
+.dirwip:
+	; Write and count 1 Sector
+	ld bc,(.tcount)
+	call b_settrack
+	ld bc,(.scount)
+	call b_setsect
+	ld bc,recbuf
+	call b_setdma
+
+	; write sector
+	call b_writesect
+	; ld a,14			; write sector
+	; ld (func),a		; BIOS f. 14 = write Sector
+	; ld c,BD_access_BIOS		; BIOS call
+	; ld de,BIOSPB
+	; call BDOS
+
+	ld bc,(.scount)
+	inc bc
+	ld (.scount),bc
+	ld bc,(.sscount)
+	inc bc
+	ld (.sscount),bc
+
+	; see if a block is full
+	ld h,0
+	ld a,(spb)
+	ld l,a	; HL=Sectors/Block
+	;ld bc,(.sscount)
+	call clcf
+	sbc hl,bc
+	jr nz,.noblk
+	ld bc,0
+	ld (.sscount),bc
+	ld bc,(.bcount)
+	inc bc
+	ld (.bcount),bc
+	push bc
+	ld c, BD_con_out
+	ld e,'.'
+	call BDOS
+	pop bc
+	; Block counted, check if done
+	ld h,0
+	ld a,(dirblk)
+	ld l,a
+	call clcf
+	sbc hl,bc
+	jr z,.dirwiped
+.noblk:
+	; Not done, see if end of track
+	ld hl,(pspt)
+	ld bc,(.scount)
+	call clcf
+	sbc hl,bc
+	jr nz,.dirwip
+	; End of track, advance
+	ld bc,(.tcount)
+	inc bc
+	ld (.tcount),bc
+	; Reset Sector
+	ld bc,0
+	ld (.scount),bc
+	jp .dirwip
+.dirwiped:
+jp mainmenu
 
 ; #######################################
 ; #	Wipe Drive  						#
 ; #######################################
 
 wipe_drv:
-	ld c,BD_print_string
 	ld de,str_wdrv
-	call BDOS
-	
+	call printstr
+
 	call getdrive
 	call getspace
-	; OFF = directory starts on sector 0 of this track
-	
-	; prepare a dummy sector
-	ld hl,recbuf
-	ld b,128
-	ld a,0E5h
-	; 128 x E5h
-	ld a,(rps)
-	push af
-	
-.preploop:
-	ld a,0E5h
-	ld (hl),a
-	inc hl
-	djnz .preploop
-	ld b,128
-	pop af
-	call hex
-	dec a
-	push af
-	jr nz,.preploop
-	pop af
+	call prepsect
 	; start at track 0 sector 0
-	
-	
-		;set Track
-	ld a,0
-	ld (breg),a
-	ld (creg),a
-	ld a,10
-	ld (func), a	; BIOS f. 10 = set Track
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
-	
+
+	;set Track
+	ld bc,0
+	call b_settrack
+
 	;set Sector
-	ld a,0
-	ld (breg),a
-	ld (creg),a
-	ld a,11
-	ld (func),a		; BIOS f. 11 = set Sector
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
+	ld bc,0
+	call b_setsect
 
 	;set DMA
 	ld bc,recbuf
-	ld a,b
-	ld (breg),a
-	ld a,c
-	ld (creg),a
-	ld a,12
-	ld (func),a		; BIOS f. 12 = set DMA
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
+	call b_setdma
 
 	ld bc,0
 	ld (.scount),bc
@@ -263,55 +286,30 @@ wipe_drv:
 	xor a
 	ld (.rcount),a
 
-.writeloop:
-	
-	ld bc,(.scount)
-	;set Sector
-	ld a,b
-	ld (breg),a
-	ld a,c
-	ld (creg),a
-	ld a,11
-	ld (func),a		; BIOS f. 11 = set Sector
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
+	ld de,str_crlf
+	call printstr
 
-		;set Track
+.writeloop:
+	;set Sector
+	ld bc,(.scount)
+	call b_setsect
+
+	;set Track
 	ld bc,(.tcount)
-	ld a,b
-	ld (breg),a
-	ld a,c
-	ld (creg),a
-	ld a,10
-	ld (func), a	; BIOS f. 10 = set Track
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
+	call b_settrack
 
 	;set DMA
 	ld bc,recbuf
-	ld a,b
-	ld (breg),a
-	ld a,c
-	ld (creg),a
-	ld a,12
-	ld (func),a		; BIOS f. 12 = set DMA
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
+	call b_setdma
 
 	; write sector
-	ld a,0
-	ld (breg),a
-	ld a,c
-	ld (creg),a
-	ld a,14			; write sector
-	ld (func),a		; BIOS f. 14 = write Sector
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
-	
+	call b_writesect
+	; ld a,14			; write sector
+	; ld (func),a		; BIOS f. 14 = write Sector
+	; ld c,BD_access_BIOS		; BIOS call
+	; ld de,BIOSPB
+	; call BDOS
+
 	;check input
 	ld c,BD_con_in_sta
 	call BDOS
@@ -320,25 +318,25 @@ wipe_drv:
 
 	ld c,BD_con_in
 	call BDOS
-	
 	cp 3
 	jp z,.end
 
-.nokey:	
-	
+.nokey:
+
 	; increment sector counter
 	ld bc,(.scount)
 	inc bc
 	ld (.scount),bc
 	; check if end of track
-	ld hl,(spt)
+
+	ld bc,(.scount)
+	ld hl,(pspt)
 	scf
 	ccf
 	sbc hl,bc
 	; if hl==0, next track
-	ld a,h
-	or l
-	jr nz,.goon
+	jp nz,.writeloop
+
 	ld bc,0
 	ld (.scount),bc
 	ld bc,(.tcount)
@@ -346,126 +344,77 @@ wipe_drv:
 	ld (.tcount),bc
 	push bc
 	ld c, BD_con_out
-	ld e,':'
+	ld e,'.'
 	call BDOS
-	pop bc	
-	ld a,b
-	call hex
-	ld a,c
-	call hex
-	
-.goon:	
-	; increment record counter
-	ld hl,.rcount
-	ld a,blm
-	cp (hl)
-	jp z,.cntblk	
-	inc (hl)
-	jp .writeloop
-
-.cntblk:
-	ld (hl),0
-	ld bc,(.bcount)
-	inc bc
-	ld (.bcount),bc
-	ld hl,(dsm)
+	pop bc
+	ld hl,(trcks)
 	scf
 	ccf
 	sbc hl,bc
-	ld a,h
-	or l
 	jp nz,.writeloop
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	; write (DSM) times the sector
-	; BLM*128
-	; DSM = number of blocks
-	; Take BSH as counter
-	; start at 16384 and half (rot. ri.) at each step
-	; count down to 3
-	; count sectors up to SPT
-	; inc track
-	; counting up track/sector numbers
-	
-jp .end
+
+jp mainmenu
 
 ; #######################################
 ; #	Read Boot Tracks					#
 ; #######################################
 
 read_boot:
-	ld c,BD_print_string
 	ld de,str_svbt
+	call printstr
+
+	call getdrive
+	call getspace
+	; at this point, we have the source drive,
+	; and know the file size
+	; get a Filename
+	call getfile
+
+	; Print 'Reading ...'
+	ld de,str_opn0
+	call printstr
+
+	ld a,(ressize+1)
+	call hex
+	ld a,(ressize+2)
+	call hex
+	ld a,(ressize+3)
+	call hex
+
+	; Print 'Records'
+	ld de,str_opn2
+	call printstr
+
+	; Print 'Saving to ...'
+	ld de,str_opn3
+	call printstr
+
+	; Print filename
+	ld de,deffcb+1
+	call printstr
+
+	; Print newline
+	ld de,str_crlf
+	call printstr
+
+
+	; Everything should be ready.
+	; Try opening the file
+	ld c,BD_make_file	; make file
+	ld de,deffcb
 	call BDOS
-	
-call getdrive
-call getspace
-; at this point, we have the source drive,
-; and know the file size
-; get a Filename
-call getfile
-
-ld c,BD_print_string	; Print 'Reading ...'
-ld de,str_opn0
-call BDOS	
-
-ld a,(ressize+1)
-call hex
-ld a,(ressize+2)
-call hex
-ld a,(ressize+3)
-call hex
-
-ld c,BD_print_string	; Print 'Records'
-ld de,str_opn2
-call BDOS	
-
-ld c,BD_print_string	; Print 'Saving to ...'
-ld de,str_opn3
-call BDOS	
-
-ld c,BD_print_string	; Print filename
-ld de,deffcb+1
-call BDOS	
-
-ld c,BD_print_string	; Print newline
-ld de,str_crlf
-call BDOS	
-
-; Everything should be ready.
-; Try opening the file
-ld c,BD_make_file	; make file
-ld de,deffcb
-call BDOS
-; if *NOT* 0, then Error
-or a
-jp nz,.founerr
-
-ld bc,0			; sectors/track
-ld de,0			; tracks to go
-				; the DPB actually holds the number 
-				; of the track after the reserved
-				; tracks. So we decrement it here.
-ld hl,(off)		
-;dec hl
-ld (off),hl
+	; if *NOT* 0, then Error
+	or a
+	jp nz,.founerr
 
 ; Now, we need to read all the sectors
 ; from all the system tracks and save
 ; them to the specified file
 
-.sector_count: dw 0
-.track_count: dw 0
+	ld bc,0
+	ld (.scount),bc
+	ld (.tcount),bc
+	ld hl,(off)
 
 .readloop:
 	ld c,02h		; print char
@@ -473,69 +422,42 @@ ld (off),hl
 	call BDOS
 
 if debug
-	ld bc,(.sector_count)
+	ld bc,(.scount)
 	ld a,b
 	call hex
 	ld a,c
 	call hex
-	ld de,(.track_count)
+	ld de,(.tcount)
 	ld a,d
 	call hex
 	ld a,e
 	call hex
-	ld c,BD_print_string	; Print newline
+	; Print newline
 	ld de,str_crlf
-	call BDOS	
+	call printstr
+
 endif
-	
+
 	;set Track
-	ld de,(.track_count)
-	ld a,d
-	ld (breg),a
-	ld a,e
-	ld (creg),a
-	ld a,10
-	ld (func), a	; BIOS f. 10 = set Track
-	ld c,BD_access_BIOS		; BIOS call
-	ld de,BIOSPB
-	call BDOS
-	
+	ld bc,(.tcount)
+	call b_settrack
+
 	ld a,(rps)
 	ld d,0
 	ld e,a
-	ld bc,(.sector_count)
-	call BC_Div_DE	
+	ld bc,(.scount)
+	call BC_Div_DE
 
 	;set Sector
-	ld a,b
-	ld (breg),a
-	ld a,c
-	ld (creg),a
-	ld c, 32h		; BIOS call
-	ld a,11
-	ld (func),a		; BIOS f. 11 = set Sector
-	ld de,BIOSPB
-	call BDOS
+	call b_setsect
 
 	;set DMA
 	ld bc,recbuf
-	ld a,b
-	ld (breg),a
-	ld a,c
-	ld (creg),a
-	ld c, 32h		; BIOS call
-	ld a,12
-	ld (func),a		; BIOS f. 12 = set DMA
-	ld de,BIOSPB
-	call BDOS
+	call b_setdma
 
 	;do read
-	ld c,BD_access_BIOS	; BIOS call
-	ld a,13
-	ld (func),a	; BIOS f. 13 = read Sector
-	ld de,BIOSPB
-	call BDOS
-
+	call b_readsect
+	
 	; Set BDOS DMA
 	ld c,BD_set_dma		; set DMA
 	ld de,recbuf
@@ -545,19 +467,19 @@ endif
 	ld a,(rps)
 	ld e,a
 	call BDOS
-	
+
 	; Save to file
 	ld c,BD_write_seq 	; save record
 	ld de,deffcb
 	call BDOS
 
 	; count sector
-	ld bc,(.sector_count)
+	ld bc,(.scount)
 	ld a,(rps)
 	ld h,0
 	ld l,a
 	add hl,bc
-	ld (.sector_count),hl
+	ld (.scount),hl
 	push hl
 	pop bc
 
@@ -565,32 +487,30 @@ endif
 	call clcf
 
 	ld hl,(spt)
-	
+
 	sbc hl,bc
 	; if != 0, next sector
 	jp nz,.readloop
 
-	ld c,BD_print_string	; Print newline
 	ld de,str_crlf
-	call BDOS	
+	call printstr
 
 	; else reset sector,
 	; and count Track
-	;ld a,(rps)
-	
-	ld bc,0
-	ld (.sector_count),bc
-	ld de,(.track_count)
-	inc de
-	ld (.track_count),de
 
-if 0;debug	
+	ld bc,0
+	ld (.scount),bc
+	ld de,(.tcount)
+	inc de
+	ld (.tcount),de
+
+if 0;debug
 	ld a,d
 	call hex
 	ld a,e
 	call hex
 endif
-	
+
 	; check track number
 	call clcf
 	ld hl,(off)
@@ -621,30 +541,161 @@ pop HL
 ld a,l
 call hex
 endif
+; Print newline
+ld de,str_crlf
+call printstr
 
-jp .end
+jp mainmenu
 
 ; #######################################
 ; #	Write Boot Tracks					#
 ; #######################################
 
 write_boot:
-	ld c,BD_print_string
 	ld de,str_wrbt
+	call printstr
+	
+	call getdrive		; (drive) = target
+	call getspace		; parse DPB
+	call getfile		; select source file
+	call prepsect		; initialize buffer with E5
+
+	; Open source file
+	ld c,BD_open_file
+	ld de,deffcb
+	call BDOS
+	or a
+	jp nz,.nofile
+
+	; TODO:
+	; Determine Filesize
+	; Check if filesize>boottracks
+	
+	; Read a physical Sector at a time
+	ld c,BD_multi_count
+	ld a,(rps)
+	ld e,a
+	call BDOS
+
+	; Start at T0/S0
+	ld bc,0
+	ld (.scount),bc
+	ld (.tcount),bc
+
+.wrboot:
+	; Clear buffer
+	call prepsect
+	
+	; set BDOS DMA
+	ld c,BD_set_dma
+	ld de,recbuf
 	call BDOS
 	
-jp .end
+	; Read from File
+	ld c,BD_read_seq
+	ld de,deffcb
+	call BDOS
+	cp 0			; if zero, all fine
+	jr z,.cont		
+	cp 1			; If 1, EOF we are done
+	jr z,.lastsect
+	jp .perror		; Else, Error
+.cont:
+	; Buffer ready
+	
+	; Set track
+	ld bc,(.tcount)
+	call b_settrack
+	
+	; Set Sector
+	ld bc,(.scount)
+	call b_setsect
+	
+	; Set BIOS DMA
+	ld bc,recbuf
+	call b_setdma
+	
+	; Write Sector
+	call b_writesect
+
+	ld c,02h		; print char
+	ld e,'.'
+	call BDOS
+	
+	; count Sector
+	ld bc,(.scount)
+	inc bc
+	ld (.scount),bc
+	
+	; Check for end of track
+	ld hl,(pspt)
+	call clcf
+	sbc hl,bc
+	jr nz,.wrboot
+	
+	; advance to next track
+	ld bc,0
+	ld (.scount),bc
+	ld bc,(.tcount)
+	inc bc
+	ld (.tcount),bc
+
+	; Print newline
+	ld de,str_crlf
+	call printstr
+
+	; sanity check: see if tcount=off
+	ld hl,(off)
+	call clcf
+	sbc hl,bc
+	jr z,.written
+
+	jr .wrboot
+
+.lastsect:
+	; Set track
+	ld bc,(.tcount)
+	; sanity check: see if tcount=off
+	ld hl,(off)
+	call clcf
+	sbc hl,bc
+	jr z,.written
+	call b_settrack
+	
+	; Set Sector
+	ld bc,(.scount)
+	call b_setsect
+	
+	; Set BIOS DMA
+	ld bc,recbuf
+	call b_setdma
+	
+	; Write Sector
+	call b_writesect
+
+	ld c,02h		; print char
+	ld e,'.'
+	call BDOS
+
+.written:
+	; Print newline
+	ld de,str_crlf
+	call printstr
+jp mainmenu
 
 ; #######################################
 ; #	Test Read Speed 					#
 ; #######################################
 
 read_bench:
-	ld c,BD_print_string
 	ld de,str_rtst
-	call BDOS
-	
-jp .end
+	call printstr
+
+
+	; Print newline
+	ld de,str_crlf
+	call printstr
+jp mainmenu
 
 ; #######################################
 ; #	Test Write Speed					#
@@ -653,14 +704,12 @@ jp .end
 ; #######################################
 
 write_bench:
-	ld c,BD_print_string
 	ld de,str_wtst
-	call BDOS
+	call printstr
 
-	ld c,BD_print_string
 	ld de,str_prep
-	call BDOS
-	
+	call printstr
+
 	; save current disk
 	ld c,BD_current_disk
 	call BDOS
@@ -676,22 +725,22 @@ write_bench:
 	and l
 	cp 0FFh
 	jp z,.end
-	
+
 	; FCB should be ready, start Search
 	ld c,BD_search_first
 	ld de,deffcb
 	call BDOS
 	cp 0FFh
 	jp z,.notfound
-	
+
 	; If found, delete
 	ld c,BD_delete_file
 	ld de,deffcb
 	call BDOS
 	or h
 	jp nz,.end
-	
-.notfound:	
+
+.notfound:
 	; Make temp file
 	ld c,BD_make_file
 	ld de,deffcb
@@ -700,49 +749,36 @@ write_bench:
 	jp nz,.end
 
 	; prepare buffer
-	ld hl,recbuf
-	xor a
-	ld c,128
-	.prep:
-	ld (hl),a
-	inc hl
-	inc a
-	dec c
-	jr nz,.prep
-	
+	call prepsect
+
 	; Wait for a fresh second to start
 	ld c,BD_get_date
 	ld de,.linebuf
 	call BDOS	; This will return seconds in A
 	ld (.tmpsec),a
-	;call hex
 	; We got the current second
 	; now add 11 and reformat the value
 	add 11h
-	daa 
+	daa
 	ld (.endsec),a
-	;call hex
 	cp 60h			; check for minute boundary
 	jp c,.waitsec	; if carry, A was < 60
 	sub 60h
 	daa
 	ld (.endsec),a
-	;call hex
 
-.waitsec:	
+.waitsec:
 	ld c,BD_get_date
 	ld de,.linebuf
 	call BDOS	; This will return seconds in A
 	ld hl,.tmpsec
 	cp (hl)
 	jp z,.waitsec
-	; We will arrive here right at the start of a fresh second.	
-	
-	
-	ld c,BD_print_string
+	; We will arrive here right at the start of a fresh second.
+
 	ld de,str_writ
-	call BDOS
-	
+	call printstr
+
 	; Count the number of records written
 	ld bc,0 		; number of records
 .writerec:
@@ -753,7 +789,7 @@ write_bench:
 	call BDOS
 	or a
 	jp nz,.end
-	
+
 	pop bc
 	inc bc
 	push bc
@@ -767,82 +803,203 @@ write_bench:
 	;call hex
 	pop bc
 	jp nz,.writerec
-	
+
 	push bc
 
 	; flush buffer
 	ld c,BD_flush_buffer
 	ld e,0FFh
 	call BDOS
-		
+
 	ld c,BD_select_disk
 	ld a,(.seldrv)
 	ld e,a
 	call BDOS
-	
+
 	; Close File
 	ld c,BD_close_file
 	ld de,deffcb
 	call BDOS
-	
+
+	; delete temp file
+	ld c,BD_delete_file
+	ld de,deffcb
+	call BDOS
+
 	; Print the results
-	ld c,BD_print_string
+
 	ld de,str_recs
-	call BDOS
-	
-	pop bc
-	ld (.wrseq),bc
-	ld a,b
-	call hex
-	ld a,c
-	call hex
-	
-	ld c,BD_print_string
+	call printstr
+
+	pop hl
+	ld (.wrseq),hl
+	call prnt_dec
+
 	ld de,str_secs
-	call BDOS
-	
-	jp .end
+	call printstr
+
+	; determine kB/s
+	; kB/s = (.wrseq * 128bytes/rec ) / (1024bytes/k * 10seconds)
+	; 		 (.wrseq) / (8records/k * 10s)
+	; kB/s = (.wrseq) / 80
+	ld hl,(.wrseq)
+	ld c,80
+	call HL_Div_C	;HL=HL/C
+	push hl
+
+	ld de,str_kps0
+	call printstr
+
+	pop hl
+	call prnt_dec
+
+	ld de,str_kps1
+	call printstr
+	; Print newline
+	ld de,str_crlf
+	call printstr
+jp mainmenu
 
 
-	
 	; All done, clean up:
 jp .end
 ; #######################################
 ; #	Local subroutines go here:			#
 ; #######################################
 
+
+; #######################################
+; #	Set Track   						#
+; # Input: Track number in BC 			#
+; #######################################
+b_settrack:
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,10
+	ld (func), a	; BIOS f. 10 = set Track
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+jp BDOS
+
+; #######################################
+; #	Set Sector  						#
+; # Input: Sector number in BC 			#
+; #######################################
+b_setsect:
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,11
+	ld (func),a		; BIOS f. 11 = set Sector
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+jp BDOS
+
+; #######################################
+; #	Set DMA address						#
+; # Input: DMA address in BC 			#
+; #######################################
+b_setdma:
+	ld a,b
+	ld (breg),a
+	ld a,c
+	ld (creg),a
+	ld a,12
+	ld (func),a		; BIOS f. 12 = set DMA
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+jp BDOS
+
+; #######################################
+; #	BIOS Read Sector					#
+; #######################################
+b_readsect:
+	ld a,13
+	ld (func),a	; BIOS f. 13 = read Sector
+	ld c,BD_access_BIOS	; BIOS call
+	ld de,BIOSPB
+jp BDOS
+
+; #######################################
+; #	BIOS Write Sector					#
+; #######################################
+b_writesect:
+	ld a,14			; write sector
+	ld (func),a		; BIOS f. 14 = write Sector
+	ld c,BD_access_BIOS		; BIOS call
+	ld de,BIOSPB
+jp BDOS
+
+; #######################################
+; #	Prepare Sector of E5's				#
+; #######################################
+
+prepsect:
+	; prepare a dummy sector
+	ld hl,recbuf
+	ld b,128
+	ld a,0E5h
+	; 128 x E5h
+	ld a,(rps)
+	push af
+
+.preploop:
+	ld a,0E5h
+	ld (hl),a
+	inc hl
+	djnz .preploop
+	ld b,128
+	pop af
+	;call hex
+	dec a
+	push af
+	jr nz,.preploop
+	pop af
+ret
+
+; #######################################
+; #	Get Filename from User				#
+; # & prepare FCB with it				#
+; #######################################
+
 getfile:
-	ld c,09h	; Print question
+		; Print question
 	ld de,str_filn
-	call BDOS	
+	call printstr
+
 
 	; clear buffer
-	ld c,16
+	ld b,16
 	ld hl,.linebuf
 	xor a
 	.clr:
 	ld (hl),a
-	dec c
-	jr nz,.clr
+	inc hl
+	djnz .clr
 
 	; prepare buffer
 	ld a,14
 	ld (.linebuf),a
 	ld a,0
 	ld (.linebuf+15),a
-	
+
 	ld c,0Ah	; get input line
 	ld de,.linebuf
 	call BDOS
-	
+
 	ld c,09h	; Print newline
 	ld de,str_crlf
-	call BDOS	
+	call BDOS
 
 	ld c,98h	; parse filename
+	ld hl,.linebuf+2
+	ld (PFCB),hl
 	ld de,PFCB
 	call BDOS
-	
+
 	ret
 
 ; #######################################
@@ -853,9 +1010,10 @@ getfile:
 ; #######################################
 
 getdrive:
-	ld c,09h	; Print newline
+		; Print newline
 	ld de,str_sdrv
-	call BDOS	
+	call printstr
+
 
 	ld c,019h	; get current disk
 	call BDOS
@@ -886,7 +1044,7 @@ getdrive:
 
 	ld c,09h	; Print string
 	ld de,str_drv0
-	call BDOS	
+	call BDOS
 
 	ld c,0
 .prnnxt:
@@ -904,16 +1062,16 @@ getdrive:
 	add a,'A'
 	ld e,a
 	ld c,02h	; Print character
-	call BDOS	
+	call BDOS
 
 	ld c,02h	; Print character
 	ld e,':'
-	call BDOS	
+	call BDOS
 
 	ld c,02h	; Print character
 	ld e,' '
 	call BDOS
-		
+
 .dontprn:
 	pop bc
 	inc c
@@ -923,17 +1081,17 @@ getdrive:
 
 	ld c,09h	; Print question
 	ld de,str_drv1
-	call BDOS	
+	call BDOS
 
 	ld c,01h	; Get Character in A
-	call BDOS	
-	
+	call BDOS
+
 	; Evaluate A to see if it corresponds to a valid drive
 	push af
 
 	sub 071h	; 70 = 'p'
 	jp p,.drvinval
-	
+
 	pop af
 	push af
 	sub 'A'
@@ -946,7 +1104,7 @@ getdrive:
 	pop af
 	sub 20h
 	push af
-.notlower:	
+.notlower:
 	sub 'Q'
 	jp p,.drvinval
 	; If we get here, we have a valid letter between A and P
@@ -965,6 +1123,11 @@ getdrive:
 	ld (drive),a
 ret
 
+; #######################################
+; #	Parse the drives DPB				#
+; # to determine all the values we need #
+; #######################################
+
 getspace:
 	ld a,(drive)
 	ld c,0Eh	; select disk
@@ -975,60 +1138,46 @@ getspace:
 	call BDOS
 
 	push hl
-	push hl
-	ld c,09h	; Print DPB addr
+		; Print DPB addr
 	ld de,str_dpba
-	call BDOS	
-	pop hl
+	call printstr
 
+	pop hl
 	push hl
+
 	ld a,h
 	call hex
-	pop hl
 	ld a,l
 	call hex
-	ld c,09h	; Print newline
-	ld de,str_crlf
-	call BDOS	
 
-	pop ix		; DPB pointer now in IX
-	ld c,09h	; Print SPT
-	ld de,str_dspt
-	call BDOS	
-	ld a,(ix+1)
-	ld (spt+1),a
-	call hex
-	ld a,(ix)
-	ld (spt),a
-	call hex
-	
-	ld c,09h	; Print OFF
-	ld de,str_doff
-	call BDOS	
-	ld a,(ix+14)
-	ld (off+1),a
-	call hex
-	ld a,(ix+13)
-	ld (off),a
-	call hex
+	ld de,str_crlf	; Print newline
+	call printstr
 
-	; Print physical sector size
-	ld c,09h	; Print PHM+1
-	ld de,str_psec
-	call BDOS	
-	ld a,(ix+16)
+	pop hl		; DPB pointer now in HL
+	ld de,LDPB
+	ld bc,17
+	ldir
+
+	ld ix,LDPB
+
+	; determine Records/Sector
+	ld a,(phm)
 	inc a
 	ld (rps),a
-	call hex
-	ld c,09h	; Print crlf
-	ld de,str_crlf
-	call BDOS	
+
+	;Determine Bytes/Sector
+	ld hl,0
+	ld de,128
+	ld a,(rps)
+	ld b,a
+.bpsloop:
+	add hl,de
+	djnz .bpsloop
+	ld (byps),hl
 
 	; calculate size
-	ld b,(ix+1)
-	ld c,(ix)
-	ld d,(ix+14)
-	ld e,(ix+13)
+	ld bc,(spt)
+	ld de,(off)
 	call mul16
 	; DE:HL should be the number of reserved records.
 	ld a,d
@@ -1040,22 +1189,164 @@ getspace:
 	ld a,l
 	ld (ressize+3),a
 
-	ld a,(ix+3)
-	ld (blm),a
 
-	ld a,(ix+5)
-	ld (dsm),a
+	; determine physical sectors per track
+	ld hl,(spt)		; actually, this is records per track.
+	ld a,(rps)		; this is records per sector
+	ld c,a
+	call HL_Div_C	; (Records/Track) / (Records/Sector) = (Sectors/Track)
+	ld (pspt),hl
 
-	
-ret	
+	; determine sectors per block
+	ld a,(blm)
+	inc a
+	ld l,a
+	ld h,0
+	ld a,(rps)
+	ld c,a
+	call HL_Div_C
+	ld a,l
+	ld (spb),a
+
+	; Tracks Total = (DSM+1) / (Blocks/Track)
+	; Blocks/Track = (Sectors/Track) / (Sectors/Block)
+	ld a,(spb)
+	ld c,a
+	ld hl,(pspt)
+	ld a,l
+	call Divide
+	ld h,0
+	ld l,b
+
+	ld c,l			; we really shouldn't expect more than 255 blocks / track
+	ld hl,(dsm)
+	inc hl
+	call HL_Div_C
+	ld bc,(off)
+	add hl,bc
+	ld (trcks),hl
+
+	; determine reserved blocks for Directory
+	ld a,(al0)
+	ld b,7
+	ld c,0
+
+.dblkloop1:
+	bit 7,a
+	jr z,.dirblkdone
+	inc c
+	sla a
+	djnz .dblkloop1
+
+	ld a,(al1)
+	ld b,7
+
+.dblkloop2:
+	bit 7,a
+	jr z,.dirblkdone
+	inc c
+	sla a
+	djnz .dblkloop2
+
+.dirblkdone:
+	ld a,c
+	ld (dirblk),a
+
+	; Determine Bytes/Block
+	ld hl,(byps)
+	ld a,(spb)
+	ld b,a
+	call mul16x8	;HL=B*HL
+	ld (bypb),hl
+
+; Print Summary
+
+	; Print Records/Track
+	ld de,str_dspt
+	call printstr
+	ld hl,(spt)
+	call prnt_dec
+
+	; Print sectors/track
+	ld de,str_pspt
+	call printstr
+	ld hl,(pspt)
+	call prnt_dec
+
+	; Print Records/Sector
+	ld de,str_psec
+	call printstr
+	ld h,0
+	ld a,(rps)
+	ld l,a
+	call prnt_dec
+
+	; Print Sectors/Block
+	ld de,str_spbl
+	call printstr
+	ld hl,(spb)
+	call prnt_dec
+
+	; Print bytes/sector
+	ld de,str_bpsc
+	call printstr
+	ld hl,(byps)
+	call prnt_dec
+
+	; Print Bytes/Block
+	ld de,str_bpbl
+	call printstr
+	ld hl,(bypb)
+	call prnt_dec
+
+	; Print total tracks
+	ld de,str_trks
+	call printstr
+	ld hl,(trcks)
+	call prnt_dec
+
+	; Print Boot Tracks
+	ld de,str_doff
+	call printstr
+	ld hl,(off)
+	call prnt_dec
+
+	; Print total blocks
+	ld de,str_blks
+	call printstr
+	ld hl,(dsm)
+	inc hl
+	call prnt_dec
+
+	; Print Dir Blocks
+	ld de,str_dblk
+	call printstr
+	ld a,(dirblk)
+	ld h,0
+	ld l,a
+	call prnt_dec
+
+	ld de,str_crlf
+	call printstr
 
 
-subint32:
-; Input: (DE) - (HL) 
-; Output: (BC)
+ret
+
+; #######################################
+; #	Print String in DE					#
+; #######################################
+printstr:
+	ld c,BD_print_string
+	jp BDOS
+
+; #######################################
+; #	32bit x 32bit  Substraction			#
+; #######################################
+
+subint32:	; (BC) = (DE) - (HL)
     ld a,(de)
 	sub (hl)
-	jp m,.oflow 
+	jp m,.oflow
 	ld (bc),a
 	inc hl
 	inc de
@@ -1082,23 +1373,36 @@ subint32:
 	jr .subret
 .oflow:
 	ld a,0FFh
-.subret:	
+.subret:
 ret
 
-mul16:
-	;Inputs:
-	;     DE and BC are factors
-	;Outputs:
-	;     A is 0
-	;     BC is not changed
-	;     DE:HL is the product
-	;902cc~1206cc, avg=1050cc
-	;20 bytes
+; #######################################
+; #	16bit x 8bit Multiplication			#
+; #  Input: 							#
+; #		B,HL							#
+; #  Output:							#
+; # 	HL 								#
+; #######################################
+mul16x8:	;HL=B*HL
+	push hl
+	pop de
+	dec b
+	jr z,.mulend
+.mullop:
+	add hl,de
+	djnz .mullop
+.mulend:
+ret
+
+; #######################################
+; #	16bit x 16bit Multiplication		#
+; #######################################
+mul16:	;DE:HL=DE*BC
 	ld hl,0
 	ld a,16
 Mul_Loop_1:
 	add hl,hl
-	rl e 
+	rl e
 	rl d
 	jr nc,$+6
 	add hl,bc
@@ -1108,35 +1412,105 @@ Mul_Loop_1:
 	jr nz,Mul_Loop_1
 ret
 
-BC_Div_DE:
-;BC/DE ==> BC, remainder in HL
-;1382cc
-;23 bytes
-
+; #######################################
+; #	16bit x 16bit Division				#
+; #######################################
+BC_Div_DE: ;BC=BC/DE, remainder in HL
   ld hl,0    ;Accumulator
   ld a,16    ;Loop counter
-
 div_loop:
   ;shift the bits from BC (numerator) into HL (accumulator)
-  sla c 
+  sla c
   rl b
   adc hl,hl
-
   ;Check if remainder >= denominator (HL>=DE)
   sbc hl,de
   jr c,div_loop_readjust
   inc c
   jr div_loop_done
-
 div_loop_readjust:
 ; remainder is not >= denominator, so we have to add DE back to HL
   add hl,de
-
 div_loop_done:
   dec a
   jr nz,div_loop
   ret
 
+; #######################################
+; #	16bit x 8bit Division				#
+; #######################################
+HL_Div_C:	;HL=HL/C
+;Outputs:
+;     A is the remainder
+;     B is 0
+;     C is not changed
+;     DE is not changed
+       ld b,16
+       xor a
+         add hl,hl
+         rla
+         cp c
+         jr c,$+4
+           inc l
+           sub c
+         djnz $-7
+       ret
+
+; #######################################
+; #	8bit x 8bit Division				#
+; #######################################
+Divide:	;    B=A/C, A=A%C (the remainder)
+ Ld B,0
+DivLoop:
+ sub A,C
+ jr c,DivEnd
+ inc B
+ jr DivLoop
+DivEnd:
+ add a,c
+ ret
+
+
+; #######################################
+; #	Print 16bit value as decimal		#
+; #######################################
+prnt_dec:
+	push hl
+	push de
+	push bc
+	; Input:
+	; HL=value
+	ld c,10
+	ld d,0
+.dloop:
+	call HL_Div_C	; returns remainder in A
+	add a,48
+	push af
+	inc d
+	ld a,h
+	or l
+	jr nz,.dloop
+
+	ld c,d
+	ld b,0
+.ploop:
+	ld (tmp),bc
+	pop af
+	ld e,a		; the character
+	ld c,BD_con_out
+	call BDOS
+	ld bc,(tmp)
+	dec c
+	jr nz,.ploop
+.pdone:
+	pop bc
+	pop de
+	pop hl
+ret
+
+; #######################################
+; #	Print 1 Byte as hex value			#
+; #######################################
 hex:
 	push bc
 	push de
@@ -1153,7 +1527,7 @@ hex:
 	and	00fh
 	call .hexdump_nib
 	pop	af
-	
+
 	pop hl
 	pop de
 	pop bc
@@ -1168,53 +1542,70 @@ hex:
 	ld c,02h
 	jp BDOS
 
+; #######################################
+; #	Clear Carry Flag					#
+; #######################################
 clcf:
 scf
 ccf
 ret
 
+; error messages
 .nofile:
-ld c,09h	; Print file name
+	; Print file name
 ld de,deffcb+1
-call BDOS	
-ld c,09h	; Print error message
+call printstr
+
+	; Print error message
 ld de,str_nfnd
-call BDOS	
+call printstr
+ld a,0FFh
 jr .end
 
 .founerr:
-ld c,09h	; Print error message
+	; Print error message
 ld de,str_fner
-call BDOS
+call printstr
+ld a,0FFh
 jr .end
 
 .toobig:
-ld c,09h	; Print error message
+	; Print error message
 ld de,str_2big
-call BDOS
+call printstr
+ld a,0FFh
 jr .end
 
 .fileinval:
-ld c,09h	; Print error message
+	; Print error message
 ld de,str_finv
-call BDOS
+call printstr
+ld a,0FFh
 jr .end
 
 .drvinval:
-ld c,09h	; Print error message
+	; Print error message
 ld de,str_invl
-call BDOS	
+call printstr
+ld a,0FFh
 jr .end
 
+.perror:
+	; Print error message
+ld de,str_perr
+call printstr
+ld a,0FFh
+jr .end
 
 ; #######################################
 ; #	Cleanup								#
 ; #######################################
-.end:	
+.end:
 push af
-ld c,09h	; Print newline
+	; Print newline
 ld de,str_crlf
-call BDOS	
+call printstr
+
 pop af
 ;restore stack
 ld sp,(.oldstk)
@@ -1234,7 +1625,7 @@ jp 0
 ; #######################################
 ; #	Data Structure for BIOS calls		#
 ; #######################################
-BIOSPB: 	
+BIOSPB:
 func:	db 30	; BIOS function no.
 areg: 	db 0 	; A register contents
 creg:	db 1 	; C register contents
@@ -1259,7 +1650,7 @@ r0:		db 0,0,0; 3 Bytes, 18 bit record adress, LSB first.
 PFCB:	; For parsing filenames
 		dw .linebuf+2	; input string
 		dw deffcb		; FCB
-		
+
 
 ; #######################################
 ; #	String declarations					#
@@ -1270,9 +1661,11 @@ str_prep: db 'Preparing...',cr,lf,0
 str_writ: db 'Writing...',cr,lf,0
 str_read: db 'Reading...',cr,lf,0
 str_ftmp: db 'TEMP.TMP ',0
-str_recs: db 'Records written: ',0
-str_secs: db ' in 10 seconds',cr,lf,0
-str_menu: db '  Main Menu',cr,lf,lf
+str_recs: db 'Recs. written: ',0
+str_secs: db ' in 10 secs',cr,lf,0
+str_kps0: db 'Aprox. Speed : ',0
+str_kps1: db ' kB/sec',cr,lf,0
+str_menu: db cr,lf,'  Main Menu',cr,lf,lf
 		  db '1 - Save Boot Tracks to File',cr,lf
 		  db '2 - Write File to Boot Tracks',cr,lf
 		  db '3 - Wipe Directory',cr,lf
@@ -1287,7 +1680,6 @@ str_svbt: db 'Save Boot Tracks',cr,lf,lf,0
 str_wrbt: db 'Write Boot Tracks',cr,lf,lf,0
 str_wdir: db 'Wipe Directory',cr,lf,lf,0
 str_wdrv: db 'Wipe Drive',cr,lf,lf,0
-
 str_opn0: db 'Reading 0x',0
 str_opn1: db ' Records from ',0
 str_opn2: db ' Records',cr,lf,0
@@ -1298,30 +1690,51 @@ str_perr: db 'Error!',cr,lf,0
 str_nfnd: db ' not found!',cr,lf,0
 str_invl: db cr,lf,'Invalid Drive!',cr,lf,0
 str_dpba: db cr,lf,lf,'DPB @ 0x',0
-str_dspt: db 'Records/Track : 0x',0
-str_doff: db cr,lf,'System Tracks : 0x',0
-str_rres: db cr,lf,'Res. Records: 0x',0
+str_dspt: db cr,lf,'Records/Track : ',0
+str_doff: db cr,lf,'System Tracks : ',0
+str_psec: db cr,lf,'Records/Sector: ',0
+str_pspt: db cr,lf,'Sectors/Track : ',0
+str_bpsc: db cr,lf,'Bytes/Sector  : ',0
+str_bptk: db cr,lf,'Blocks/Track  : ',0
+str_blks: db cr,lf,'Usable Blocks : ',0
+str_trks: db cr,lf,'Total  Tracks : ',0
+str_spbl: db cr,lf,'Sectors/Block : ',0
+str_dblk: db cr,lf,'Directory Blks: ',0
+str_bpbl: db cr,lf,'Bytes / Block : ',0
+str_rres: db cr,lf,'Res. Records: ',0
 str_rfil: db 'File Records: 0x',0
 str_2big: db 'File too big!',cr,lf,0
 str_filn: db cr,lf,'Enter Filename: ',0
 str_finv: db cr,lf,'Invalid Filename!',cr,lf,0
 str_fner: db 'File exists, aborting!',cr,lf,0
 str_sdrv: db 'Scanning drives...',cr,lf,0
-str_psec: db cr,lf,'Records/Sector: 0x',0
-
 
 ; #######################################
 ; #	Stack and Buffers					#
 ; #######################################
 drives:	  ds 16	; Flag drives
 drive:	  db 0 	; selected drive
-spt:	  dw 0
-off:	  dw 0
-psh:	  db 0
-rps:	  db 0
-blm:	  db 0
-dsm:	  dw 0
-fsize:    ds 4	; 4 bytes for the file size
+LDPB:
+spt:	dw 0
+bsh:	db 0
+blm:	db 0
+exm:	db 0
+dsm:	dw 0
+drm:	dw 0
+al0:	db 0
+al1:	db 0
+cks:	dw 0
+off:	dw 0
+psh:	db 0
+phm:	db 0
+rps:	db 0
+pspt:	dw 0
+spb:	db 0
+byps:	dw 0
+bypb:	dw 0
+dirblk:	db 0
+trcks:	dw 0
+fsize:  ds 4	; 4 bytes for the file size
 ressize:  ds 4 	; 4 bytes for the offset size
 tmp:	  ds 4  ; 4 bytes buffer
 .scount: dw 0
