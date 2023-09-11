@@ -11,7 +11,7 @@ false	equ not true
 banked	equ true
 .debug:		equ	0
 m_debug		equ 0
-VDP			equ 0
+VDP			equ 1
 VDP_font 	equ 0
 RTC_debug	equ 0
 

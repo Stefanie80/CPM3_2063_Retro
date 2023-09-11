@@ -166,6 +166,348 @@ jp z,write_bench; In = 6
 xor a
 jp .end
 
+; #######################################
+; #	Test Read Speed 					#
+; #######################################
+
+read_bench:
+	ld de,str_rtst
+	call printstr
+
+	call getdrive
+	call getspace
+	
+	; prepare file
+	ld de,str_prep
+	call printstr
+
+	; Search for temp file
+	ld hl,str_ftmp
+	ld (PFCB),hl
+	ld c,BD_parse_filnm
+	ld de,PFCB
+	call BDOS
+	ld a,h
+	and l
+	cp 0FFh
+	jp z,.end
+
+	; FCB should be ready, start Search
+	ld c,BD_search_first
+	ld de,deffcb
+	call BDOS
+	cp 0FFh
+	jp z,.notfoun
+
+	; If found, delete
+	ld c,BD_delete_file
+	ld de,deffcb
+	call BDOS
+	or h
+	jp nz,.end
+
+.notfoun:
+	; Make temp file
+	ld c,BD_make_file
+	ld de,deffcb
+	call BDOS
+	or h
+	jp nz,.end
+
+	; prepare buffer
+	call prepsect
+	
+	; write something to the file
+	ld c,BD_set_dma
+	ld de,recbuf
+	call BDOS
+	
+	ld c,BD_write_seq
+	ld de,deffcb
+	call BDOS
+	or a
+	jp nz,.end
+
+	; prepare Loop
+	ld bc,0
+	ld (.scount),bc
+
+	; wait for second
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld (.tmpsec),a
+	; We got the current second
+	; now add 11 and reformat the value
+	add 11h
+	daa
+	ld (.endsec),a
+	cp 60h			; check for minute boundary
+	jp c,.waitsec0	; if carry, A was < 60
+	sub 60h
+	daa
+	ld (.endsec),a
+
+.waitsec0:
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld hl,.tmpsec
+	cp (hl)
+	jp z,.waitsec0
+	; We will arrive here right at the start of a fresh second.
+	ld de,str_read
+	call printstr
+
+.readspeed:
+	; reset record pointer 
+	ld ix,deffcb
+	xor a
+	ld (ix+31),a
+	
+	; read record
+	;ld c,BD_read_random
+	;ld de,deffcb
+	;call BDOS
+	;or a
+	;jp nz,.end 
+	
+	call b_readsect
+	
+	; count record
+	ld bc,(.scount)
+	inc bc
+	ld (.scount),bc
+
+	; check the time
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld hl,.endsec
+	cp (hl)
+	jp nz,.readspeed
+
+	; report result
+	ld hl,(.scount)
+	ld de,(.scount)
+	ld a,(rps)
+	dec a
+	jr z,.dontmul
+	ld b,a
+	call clcf
+.localmul:
+	adc hl,de
+	djnz .localmul
+	
+	ld (.scount),hl
+.dontmul:
+	
+	; Close File
+	ld c,BD_close_file
+	ld de,deffcb
+	call BDOS
+
+	; delete temp file
+	ld c,BD_delete_file
+	ld de,deffcb
+	call BDOS
+
+	; Print the results
+
+	ld de,str_recr
+	call printstr
+
+	ld hl,(.scount)
+	call prnt_dec
+
+	ld de,str_secs
+	call printstr
+
+	; determine kB/s
+	; kB/s = (.wrseq * 128bytes/rec ) / (1024bytes/k * 10seconds)
+	; 		 (.wrseq) / (8records/k * 10s)
+	; kB/s = (.wrseq) / 80
+	ld hl,(.scount)
+	ld c,80
+	call HL_Div_C	;HL=HL/C
+	push hl
+
+	ld de,str_kps0
+	call printstr
+
+	pop hl
+	call prnt_dec
+
+	ld de,str_kps1
+	call printstr
+
+	; Print newline
+	ld de,str_crlf
+	call printstr
+jp mainmenu
+
+; #######################################
+; #	Test Write Speed					#
+; # 	TODO:							#
+; # 		Add Multi-Sector Test		#
+; #######################################
+
+write_bench:
+	ld de,str_wtst
+	call printstr
+
+	ld de,str_prep
+	call printstr
+
+	; save current disk
+	ld c,BD_current_disk
+	call BDOS
+	ld (.seldrv),a
+
+	; Search for temp file
+	ld hl,str_ftmp
+	ld (PFCB),hl
+	ld c,BD_parse_filnm
+	ld de,PFCB
+	call BDOS
+	ld a,h
+	and l
+	cp 0FFh
+	jp z,.end
+
+	; FCB should be ready, start Search
+	ld c,BD_search_first
+	ld de,deffcb
+	call BDOS
+	cp 0FFh
+	jp z,.notfound
+
+	; If found, delete
+	ld c,BD_delete_file
+	ld de,deffcb
+	call BDOS
+	or h
+	jp nz,.end
+
+.notfound:
+	; Make temp file
+	ld c,BD_make_file
+	ld de,deffcb
+	call BDOS
+	or h
+	jp nz,.end
+
+	; prepare buffer
+	call prepsect
+
+	; Wait for a fresh second to start
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld (.tmpsec),a
+	; We got the current second
+	; now add 11 and reformat the value
+	add 11h
+	daa
+	ld (.endsec),a
+	cp 60h			; check for minute boundary
+	jp c,.waitsec	; if carry, A was < 60
+	sub 60h
+	daa
+	ld (.endsec),a
+
+.waitsec:
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld hl,.tmpsec
+	cp (hl)
+	jp z,.waitsec
+	; We will arrive here right at the start of a fresh second.
+
+	ld de,str_writ
+	call printstr
+
+	; Count the number of records written
+	ld bc,0 		; number of records
+.writerec:
+	push bc
+	; write record
+	ld c,BD_write_seq
+	ld de,deffcb
+	call BDOS
+	or a
+	jp nz,.end
+
+	pop bc
+	inc bc
+	push bc
+
+	; check the time
+	ld c,BD_get_date
+	ld de,.linebuf
+	call BDOS	; This will return seconds in A
+	ld hl,.endsec
+	cp (hl)
+	;call hex
+	pop bc
+	jp nz,.writerec
+
+	push bc
+
+	; flush buffer
+	ld c,BD_flush_buffer
+	ld e,0FFh
+	call BDOS
+
+	ld c,BD_select_disk
+	ld a,(.seldrv)
+	ld e,a
+	call BDOS
+
+	; Close File
+	ld c,BD_close_file
+	ld de,deffcb
+	call BDOS
+
+	; delete temp file
+	ld c,BD_delete_file
+	ld de,deffcb
+	call BDOS
+
+	; Print the results
+
+	ld de,str_recs
+	call printstr
+
+	pop hl
+	ld (.wrseq),hl
+	call prnt_dec
+
+	ld de,str_secs
+	call printstr
+
+	; determine kB/s
+	; kB/s = (.wrseq * 128bytes/rec ) / (1024bytes/k * 10seconds)
+	; 		 (.wrseq) / (8records/k * 10s)
+	; kB/s = (.wrseq) / 80
+	ld hl,(.wrseq)
+	ld c,80
+	call HL_Div_C	;HL=HL/C
+	push hl
+
+	ld de,str_kps0
+	call printstr
+
+	pop hl
+	call prnt_dec
+
+	ld de,str_kps1
+	call printstr
+	; Print newline
+	ld de,str_crlf
+	call printstr
+jp mainmenu
 
 ; #######################################
 ; #	Wipe Directory 						#
@@ -682,184 +1024,6 @@ write_boot:
 	ld de,str_crlf
 	call printstr
 jp mainmenu
-
-; #######################################
-; #	Test Read Speed 					#
-; #######################################
-
-read_bench:
-	ld de,str_rtst
-	call printstr
-
-
-	; Print newline
-	ld de,str_crlf
-	call printstr
-jp mainmenu
-
-; #######################################
-; #	Test Write Speed					#
-; # 	TODO:							#
-; # 		Add Multi-Sector Test		#
-; #######################################
-
-write_bench:
-	ld de,str_wtst
-	call printstr
-
-	ld de,str_prep
-	call printstr
-
-	; save current disk
-	ld c,BD_current_disk
-	call BDOS
-	ld (.seldrv),a
-
-	; Search for temp file
-	ld hl,str_ftmp
-	ld (PFCB),hl
-	ld c,BD_parse_filnm
-	ld de,PFCB
-	call BDOS
-	ld a,h
-	and l
-	cp 0FFh
-	jp z,.end
-
-	; FCB should be ready, start Search
-	ld c,BD_search_first
-	ld de,deffcb
-	call BDOS
-	cp 0FFh
-	jp z,.notfound
-
-	; If found, delete
-	ld c,BD_delete_file
-	ld de,deffcb
-	call BDOS
-	or h
-	jp nz,.end
-
-.notfound:
-	; Make temp file
-	ld c,BD_make_file
-	ld de,deffcb
-	call BDOS
-	or h
-	jp nz,.end
-
-	; prepare buffer
-	call prepsect
-
-	; Wait for a fresh second to start
-	ld c,BD_get_date
-	ld de,.linebuf
-	call BDOS	; This will return seconds in A
-	ld (.tmpsec),a
-	; We got the current second
-	; now add 11 and reformat the value
-	add 11h
-	daa
-	ld (.endsec),a
-	cp 60h			; check for minute boundary
-	jp c,.waitsec	; if carry, A was < 60
-	sub 60h
-	daa
-	ld (.endsec),a
-
-.waitsec:
-	ld c,BD_get_date
-	ld de,.linebuf
-	call BDOS	; This will return seconds in A
-	ld hl,.tmpsec
-	cp (hl)
-	jp z,.waitsec
-	; We will arrive here right at the start of a fresh second.
-
-	ld de,str_writ
-	call printstr
-
-	; Count the number of records written
-	ld bc,0 		; number of records
-.writerec:
-	push bc
-	; write record
-	ld c,BD_write_seq
-	ld de,deffcb
-	call BDOS
-	or a
-	jp nz,.end
-
-	pop bc
-	inc bc
-	push bc
-
-	; check the time
-	ld c,BD_get_date
-	ld de,.linebuf
-	call BDOS	; This will return seconds in A
-	ld hl,.endsec
-	cp (hl)
-	;call hex
-	pop bc
-	jp nz,.writerec
-
-	push bc
-
-	; flush buffer
-	ld c,BD_flush_buffer
-	ld e,0FFh
-	call BDOS
-
-	ld c,BD_select_disk
-	ld a,(.seldrv)
-	ld e,a
-	call BDOS
-
-	; Close File
-	ld c,BD_close_file
-	ld de,deffcb
-	call BDOS
-
-	; delete temp file
-	ld c,BD_delete_file
-	ld de,deffcb
-	call BDOS
-
-	; Print the results
-
-	ld de,str_recs
-	call printstr
-
-	pop hl
-	ld (.wrseq),hl
-	call prnt_dec
-
-	ld de,str_secs
-	call printstr
-
-	; determine kB/s
-	; kB/s = (.wrseq * 128bytes/rec ) / (1024bytes/k * 10seconds)
-	; 		 (.wrseq) / (8records/k * 10s)
-	; kB/s = (.wrseq) / 80
-	ld hl,(.wrseq)
-	ld c,80
-	call HL_Div_C	;HL=HL/C
-	push hl
-
-	ld de,str_kps0
-	call printstr
-
-	pop hl
-	call prnt_dec
-
-	ld de,str_kps1
-	call printstr
-	; Print newline
-	ld de,str_crlf
-	call printstr
-jp mainmenu
-
 
 	; All done, clean up:
 jp .end
@@ -1662,6 +1826,7 @@ str_writ: db 'Writing...',cr,lf,0
 str_read: db 'Reading...',cr,lf,0
 str_ftmp: db 'TEMP.TMP ',0
 str_recs: db 'Recs. written: ',0
+str_recr: db 'Recs. read: ',0
 str_secs: db ' in 10 secs',cr,lf,0
 str_kps0: db 'Aprox. Speed : ',0
 str_kps1: db ' kB/sec',cr,lf,0
@@ -1669,7 +1834,7 @@ str_menu: db cr,lf,'  Main Menu',cr,lf,lf
 		  db '1 - Save Boot Tracks to File',cr,lf
 		  db '2 - Write File to Boot Tracks',cr,lf
 		  db '3 - Wipe Directory',cr,lf
-		  db '4 - Wipe Drive',cr,lf
+		  db '4 - Wipe Drive (Danger!)',cr,lf
 		  db '5 - Test Read Speed',cr,lf
 		  db '6 - Test Write Speed',cr,lf,lf
 		  db '0 - Quit',cr,lf,lf
