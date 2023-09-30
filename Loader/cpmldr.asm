@@ -13,10 +13,11 @@
 
 base	equ	$
 abase	equ	base-0100h
-cr		equ	0dh
-lf		equ	0ah
 
-fcb		equ	abase+005ch	;default FCB address
+cr	equ	0dh
+lf	equ	0ah
+
+fcb	equ	abase+005ch	;default FCB address
 buff	equ	abase+0080h	;default buffer address
 
 ;
@@ -36,39 +37,30 @@ bnktop	equ	abase+82h
 bnklen	equ	abase+83h
 osentry	equ	abase+84h
 
-	extrn vinit
+; function call to hand off register values from ROM to CPM
+extrn handoff
 
 	cseg
-
-	; The very first step must be, switch the bottom RAM bank to 0
-	mvi a,00fh
-	out	010h
-	; Now move ourselves from 0xC000 to 0x100
-	; We also don't need all 16k, but why not?
-	; All of this *should* fit below CPM
-	lxi d,0100h	; destination
-	lxi h,0C000h	; source
-	lxi b,02000h	; count = 8k
-	ldir
-	jmp 0115h
-	nop ; this is a NOP ramp 
-	nop	; it does nothing
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
 	
-begin:		; the linker should encode this jump point for a base of 0x1000
+	; Entry Point
+	; Save the registers (somehow)
+	exx 	; this will be 0xC000
+
+	; Move to 0100h
+	lxi d,0100h
+	lxi h,0C000h
+	lxi b,03FFFh
+	ldir
+	
+	jmp begin
+	
+	
+begin: 	; 0100h+12
+
 
 	lxi	sp,stackbot
-
+	
+	exx
 	call	bootf		;first call is to Cold Boot
 
 	mvi	c,resetsys	;Initialize the System
@@ -100,13 +92,13 @@ cloop:
 	inx	h
 	dcr	c
 	jnz	cloop
-
+	
 	call	read$proc	;read display info
 
 	mvi	c,printbuf	;print the info
 	lxi	d,buff
 	call	bdos
-
+	
 ;
 ;	Main System Load
 ;
@@ -140,7 +132,7 @@ execute:
 	cpi	'B'
 	cz	break
 execute$sys:
-	call vinit
+	call handoff
 	lxi	sp,osentry$adr
 	ret
 
@@ -222,10 +214,10 @@ signon:
 	;db	lf,lf,lf,lf,lf,lf,lf,lf,lf,lf,lf,lf
 	;db	lf,lf,lf,lf,lf,lf,lf,lf,lf,lf,lf,lf
 	db	'CP/M V3.0 Loader',cr,lf
-	db	'Copyright (C) 1982, Digital Research',cr,lf,lf,'$'
+	db	'Copyright (C) 1982, Digital Research'
 	db	cr,lf,'$'
-	db	'021182',0,0,0,0
 
+	db	'021182',0,0,0,0
 stackbot:
 
 mem$top:
@@ -269,19 +261,20 @@ ctlh	equ	08h	; backspace
 
 
 ;
-serial: db	0,0,0,0,0,0
+serial: db	0,2,1,1,8,2
 ;
 ;	Enter here from the user's program with function number in c,
 ;	and information address in d,e
 ;
 
+public bdos 
 bdos:
 bdose:					; Arrive here from user programs
 	xchg! shld info! xchg 		; info=de, de=info
 
 	mov a,c! cpi 14! jc bdose2
 	sta fx 				; Save disk function #
-	xra a! sta dircnt
+	xra a! sta dircnt 
 	lda seldsk! sta olddsk 		; Save seldsk
 
 bdose2:
@@ -307,7 +300,7 @@ bdos$jmp:
 
 	mov e,a! mvi d,0 		; de=func, hl=.ciotab
 	dad d! dad d! mov e,m! inx h! mov d,m ; de=functab(func)
-	lhld info 			; info in de for later xchg
+	lhld info 			; info in de for later xchg	
 	xchg! pchl 			; dispatched
 
 
@@ -419,9 +412,9 @@ func2:	equ	tabout
 ;
 func9:
 					;write line until $ encountered
-	xchg				;was lhld info
+	xchg				;was lhld info	
 	mov c,l! mov b,h 		;BC=string address
-	jmp print 			;out to console
+	jmp print 			;out to console	
 ;
 sta$ret:
 					;store the A register to aret
@@ -620,7 +613,7 @@ seek:
 			; Seek the track given by arecord (actual record)
 
 	lhld curtrka! mov c,m! inx h! mov b,m 	; bc = curtrk
-	push b 					; s0 = curtrk
+	push b 					; s0 = curtrk 
 	lhld curreca! mov e,m! inx h! mov d,m
 	inx h! mov b,m 				; bde = currec
 	lhld arecord! lda arecord+2! mov c,a 	; chl = arecord
@@ -642,8 +635,8 @@ seek1:
 seek2:
 	xthl! push h 			; hl,s0 = curtrk, s1 = low(arecord)
 	lhld sectpt! call bde$e$bde$m$hl 	; currec = currec - sectpt
-	pop h! push d! push b! push h 		; hl,s0 = curtrk,
-			; s1 = high(arecord,currec), s2 = low(currec),
+	pop h! push d! push b! push h 		; hl,s0 = curtrk, 
+			; s1 = high(arecord,currec), s2 = low(currec), 
 			; s3 = low(arecord)
 	xchg! lhld offset! dad d
 	mov b,h! mov c,l! shld track
@@ -773,7 +766,7 @@ getrcnta:
 getfcba:
 	; Compute reccnt and nxtrec addresses for get/setfcb
 	call getrcnta! xchg ; de=.fcb(reccnt)
-	lxi h,(nxtrec-reccnt)! dad d ; hl=.fcb(nxtrec)
+	lxi h,(nxtrec-reccnt)! dad d ; hl=.fcb(nxtrec) 
 	ret
 
 getfcb:
@@ -1069,7 +1062,7 @@ set$rc: 				; hl=.fcb(ext), c=dirext
 	mvi a,128! mov b,m
 
   set$rc1:
-		mov m,a! mov a,b! sta actual$rc! ret
+		mov m,a! mov a,b! sta actual$rc! ret 
   set$rc2:
 		sta actual$rc
 		mov a,m! ora a! rnz 	; ret if rc ~= 0
@@ -1194,7 +1187,7 @@ reselect:
 						; fcb(ext) = fcb(ext) & 1fh
 	call clr$ext
 
-	; if fcb(rc) & 80h
+	; if fcb(rc) & 80h 
 	;    then fcb(rc) = 80h, actual$rc = fcb(rc) & 7fh
 	;    else actual$rc = 0
 
@@ -1238,7 +1231,7 @@ func13:
 	lxi h,tbuff! shld dmaad 		; dmaad = tbuff
         jmp setdata 				; to data dma address
 
-func14:
+func14:	
 			; Select disk info
 	call set$seldsk 			; seldsk = linfo
 	jmp curselect
@@ -1331,7 +1324,7 @@ func49	equ	func$ret
 
 func50	equ	func$ret
 
-func100	equ func$ret
+func100	equ func$ret	
 
 func101	equ func$ret
 
@@ -1529,7 +1522,7 @@ deblock:
 					; Is command flush?
 	pop a! push a! cpi 4
 	jnc deblock1 			; yes
-					; Is referenced physical record
+					; Is referenced physical record 
 					;already in buffer?
 	call compare! jz deblock45 	; yes
 	xra a

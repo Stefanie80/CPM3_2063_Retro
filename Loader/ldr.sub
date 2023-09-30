@@ -1,13 +1,11 @@
-r Loader\cpmldr.asm
+r Loader\CPMLDR.ASM
 r Loader\ldrbios.z80
-r Loader\LDsdcard.z80
-r Loader\LDspi.z80
-r Loader\LDnocach.z80
 
-zmac ldrbios
-rmac cpmldr.asm
+RMAC CPMLDR
+ZMAC ldrbios
 
-link loadr[L100]=cpmldr,ldrbios
-era ldr.bin
-ren ldr.bin loadr.com
-w build\ldr.bin b
+LINK LDR[L100]=CPMLDR,LDRBIOS
+
+era LDR.BIN
+ren LDR.BIN=LDR.COM
+w build\LDR.BIN b
