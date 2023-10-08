@@ -57,10 +57,6 @@ For the Tools:       SUBMIT TOOLS
 All resulting files will be placed in the "build" folder.
 
 
-For those who do not wish to tinker with the source, or want to try the system before diving into it, 
-i have prepared a package containing a fully running system with an emulator of John's board. You can download it here:
-https://drive.google.com/file/d/10RHLt3bqPHN4sBdgkRkXFwICIUTqFL7T/view?usp=drive_link
-
 You can also make your own board and use the system on real hardware. All the files needed for the board can be found in John's repository mentioned above.
 His board is specifically designed to be 100mm², because that size gives a big discount when ordering PCBs from PCBway or other PCB makers. 
 And it uses almost exclusively through hole components, so it is easy to solder by hand.
