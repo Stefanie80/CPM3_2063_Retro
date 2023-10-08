@@ -1,0 +1,845 @@
+; Simplified SD card driver for ROM
+; R/W functions take LBA block number in DE:HL
+; and buffer address in BC
+
+; Config Equates
+true		equ -1
+false		equ not true
+.sd_debug 	equ false
+
+; Non-printable chars
+cr			equ 13
+lf			equ 10
+.sector_buffer equ 08000h
+
+; Equates for ports & bits
+gpio_in		equ 000h	; GP input port
+gpio_out	equ	010h	; GP output port
+
+; Public declarations	
+	public sdinit, sdwrite, sdread
+		sdinit 	equ sdcard_init
+		sdwrite equ sdcard_write
+		sdread	equ sdcard_read
+		
+	extrn gpiocache,iputs,puts_crlf,hexdump_a,hexdmp
+
+
+	CSEG ; Code segment
+
+sdcard_write:
+	ld (oldstack),sp
+	ld sp,sdstack
+if .sd_debug > 0
+	push bc
+	push de
+	push hl
+	call iputs
+	db 'SD.WRITE',cr,lf,0
+	pop hl
+	pop de
+	pop bc	
+endif
+	;call .calc_sd_block
+	ld (@dma),bc
+	ld a,24|040h		; the command byte
+	ld (.sd_scratch),a
+	ld a,d
+	ld (.sd_scratch+1),a
+	ld a,e
+	ld (.sd_scratch+2),a
+	ld a,h
+	ld (.sd_scratch+3),a
+	ld a,l
+	ld (.sd_scratch+4),a
+	ld a,000h|001h	; the CRC byte
+	ld (.sd_scratch+5),a
+	
+    call sd_cmd24        ; write the SD block
+
+	or a
+	jr z,writedone
+	ld a,1		; pass error to BDOS
+	
+writedone:	
+if .sd_debug > 0
+	push af
+	call iputs
+	db '/SD.WRITE:',0
+	pop af
+	push af
+	call hexdump_a
+	call puts_crlf
+	call puts_crlf
+	pop af
+endif
+	ld sp,(oldstack)
+ret
+
+sdcard_read:
+	ld (oldstack),sp
+	ld sp,sdstack
+if .sd_debug > 0
+	push bc
+	push de
+	push hl
+	call iputs
+	db 'SD.READ',cr,lf,0
+	pop hl
+	pop de
+	pop bc
+endif
+	;call .calc_sd_block
+	ld (@dma),bc
+	ld	a,17|040h		; the command byte
+	ld (.sd_scratch),a
+	ld a,d
+	ld (.sd_scratch+1),a
+	ld a,e
+	ld (.sd_scratch+2),a
+	ld a,h
+	ld (.sd_scratch+3),a
+	ld a,l
+	ld (.sd_scratch+4),a
+	ld a,000h|001h	; the CRC byte
+	ld (.sd_scratch+5),a
+	
+    call sd_cmd17        ; read the SD block
+
+if .sd_debug > 0
+	push af
+	call iputs
+	db '/SD.READ:',0
+	pop af
+	push af
+	call hexdump_a
+	call puts_crlf
+	call puts_crlf
+	pop af
+endif
+	ld sp,(oldstack)
+ret
+
+sd_cmd17:
+if .sd_debug > 0
+	call iputs
+	db 'SD.CMD17',cr,lf,0
+endif
+
+	call sdlower_cs			; enable card
+	call sdcommand			; send command
+	or a
+	jr nz,cmd17done			; if response !=0, error
+	; wait for the token from the card
+	ld bc,01000h			; timeout value
+	cmd17wait:
+		call sdreceive_byte
+		ld a,l
+		cp 0FFh
+		jr nz,cmd17token	; we got something
+		dec bc
+		ld a,b
+		or c
+		jr nz,cmd17wait
+		; if we get here, timeout
+		ld a,0ffh
+		jr cmd17done
+	cmd17token:
+	cp 0FEh					; ready token?
+	jr nz,cmd17done			; if not, abort
+	ld hl,(@dma)
+	call sdreceive_sector	; read block
+	xor a					; zero A to indicate success
+cmd17done:
+	push af
+	call sdraise_cs			; disable card
+	pop af
+ret
+
+sd_cmd24:
+if .sd_debug > 0
+	call iputs
+	db 'SD.CMD24',cr,lf,0
+endif
+	call sdlower_cs 		; enable card
+	call sdcommand			; send command
+	call sdreceive_byte		; give the card 8 extra clocks
+	ld l,0FEh
+	call sdtransmit_byte	; send token
+	ld hl,(@dma)
+	call sdtransmit_sector	; write block
+	ld bc,0f000h
+cmd24wait:		; wait for a response
+		push bc
+		call sdreceive_byte
+		pop bc
+		ld a,l
+		cp 0FFh
+		jr nz,cmd24response
+		dec bc
+		ld a,b
+		or c
+		jr nz,cmd24wait
+		; If we get here, timeout
+		call iputs
+		db 'SD.CMD24:timeout',cr,lf,0
+		ld a,0ffh
+		jr cmd24return
+cmd24response:
+	; Make sure the response is 0bxxx00101 else is an error		
+	and 01fh
+	cp 005h
+	ld a,0f0h
+	jr nz,cmd24return
+	xor a					; zero A to indicate success
+cmd24done:	
+	push af
+	call sdraise_cs			; disable card
+	call sdlower_cs
+cmd24busy:
+	call sdreceive_byte
+	ld a,l
+	cp 0FFh
+	jr nz,cmd24busy
+	call sdraise_cs
+if .sd_debug > 0
+	push af
+	call iputs
+	db '/SD.CMD24',cr,lf,0
+	pop af
+endif
+cmd24return:
+	pop af
+ret
+
+sdcommand:
+if .sd_debug >0
+	call iputs
+	db 'CMD:',0
+	ld bc,6
+	ld hl,.sd_scratch
+	ld e,0
+	call hexdmp ;dump BC bytes from HL. If E!=0 be fancy
+endif
+	ld b,6				; bytes to send
+	ld ix,.sd_scratch	; command buffer
+	cmdbyte:
+		ld l,(ix)
+		call sdtransmit_byte
+		inc ix
+		djnz cmdbyte
+	; command sent, wait for response	
+	ld	b,0FFh		; B = number of retries
+	sdr1loop:
+		push bc
+		call sdreceive_byte	; read a byte into A (and L)
+		pop bc
+		and	080h		; Is the MSB set to 1?
+		jr z,sdr1done	; If MSB=0 then we are done
+	djnz sdr1loop	; else try again until the retry count runs out
+		
+sdr1done:
+	ld a,l
+if .sd_debug
+	push af
+	call iputs
+	db ' R:',0
+	pop af
+	push af
+	call hexdump_a
+	;call puts_crlf
+	pop af
+endif	
+ret
+
+sdlower_cs:
+	ld	a,(gpiocache)
+	and	0FDh
+	or	001h
+	out	(gpio_out),a
+	and	0FBh
+	ld	(gpiocache),a
+	out	(gpio_out),a
+ret
+
+	
+sdraise_cs:
+	ld	a,(gpiocache)
+	and	0FDh
+	out	(gpio_out),a
+	or	005h
+	ld	(gpiocache),a
+	out	(gpio_out),a
+	; Fall through
+sdreceive_byte:	; return byte in L
+	ld	a,(gpiocache)
+	or	001h		; data high
+	and	0FDh		; clock
+	ld	d,a
+	add	2
+	ld	e,a		; D is clock low E is high
+	ld	c,010h
+	call	sd_rx
+	ld a,l
+ret
+
+	; Entry point with registers set up
+sd_rx:
+	;	Clock the bits	(47 clocks a bit) or about 25K/second minus
+	; 	overheads per byte - so nearer 20K which is adequate for our
+	; 	needs
+	;	Bit 0
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 1
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 2
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 3
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 4
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 5
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 6
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 7
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	ret
+
+;
+;	Slightly less performance critical which
+;	is good as it's annoying on this setup
+;	due to the shared gpio
+;
+;	Byte to send is in L
+;
+sdtransmit_byte:
+	ld	a,(gpiocache)
+	and	0FDh		; clock high
+	;	Clock the bits out. Ignore reply
+	;	48 clocks a bit
+	;	
+	ld	h,2	; saves us 6 clocks a bit
+	;
+	;	Bit 0
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 1
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 2
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 3
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 4
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 5
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 6
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 7
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+
+	xor	a
+	ret
+
+; (HL) -> Sector buffer
+sdreceive_sector:
+	push	ix
+	push	hl
+	pop	ix
+	
+rx_byte:
+	call	sdreceive_byte
+	ld	(ix),l
+	inc	ix
+	call	sd_rx
+	ld	(ix),l
+	inc	ix
+	ld	b,0FFh		; 510 bytes
+rx_loop:
+	call	sd_rx
+	ld	(ix),l	
+	inc	ix
+	call	sd_rx
+	ld	(ix),l
+	inc	ix
+	djnz	rx_loop
+	pop	ix
+	xor	a
+ret
+
+sdtransmit_sector:
+	push	ix
+	push	hl
+	pop	ix
+	ld	b,0
+tx_byte:
+	ld	l,(ix)
+	inc	ix
+	call	sdtransmit_byte
+	ld	l,(ix)
+	inc	ix
+	call	sdtransmit_byte
+	djnz	tx_byte
+	pop	ix
+ret
+	
+
+;##########################################################################
+; Called once before library is used.
+;##########################################################################
+sdcard_init:
+	ld (oldstack),sp
+	ld sp,sdstack
+
+;	call	iputs
+;	db	'NOTICE: rw_nocache library installed. Disk cache disabled.\r\n\0'
+
+	call sd_boot
+	call sd_cmd0
+	cp 1
+	jr z,.init1
+	;Error
+	ld a,080h
+	jp .sd_err
+.init1:	
+	call sd_cmd8	; A=0=success,A=81h=unsup/no r7 r7,A=80h=timeout
+	cp 080h
+	jp z,.sd_err
+	call sdcmd58	; read OCR
+	; evaluate
+	; The interesting bits are:
+	; The voltage range:
+;	bit 15 = 2.7-2.8 V
+;	bit 16 = 2.8-2.9 V
+; 	...
+;	bit 23 = 3.5-3.6 V
+	; bit 30 = Card Capacity Status (CCS)
+	; bit 31 = power up status 
+
+.init2:	
+	ld	b,128			; max retry
+.ac41loop:
+	push bc			; save BC since B contains the retry count 
+	call sd_acmd41		; ask if the card is ready
+	pop	bc			; restore our retry counter
+	or	a			; check to see if A is zero
+	jr	z,.ac41done		; is A is zero, then the card is ready
+	; Card is not ready, waste some time before trying again
+	ld	hl,01000h		; count to 0x1000 to consume time
+.ac41dly:
+	dec	hl			; HL = HL -1
+	ld	a,h			; does HL == 0?
+	or	l
+	jr	nz,.ac41dly		; if HL != 0 then keep counting
+	djnz	.ac41loop		; if (--retries != 0) then try again
+	; Error
+	ld a,082h
+	jp .sd_err
+	
+.ac41done:
+	call sdcmd58
+	ld	a,(.sd_scratch+1)
+	and	040h			; CCS bit is here (See spec p275)
+	jr	nz,.initdone
+	; Error
+	ld a,083h
+.sd_err:
+	push af
+	call	iputs
+	db	'SDerr: ',0	
+	pop af
+	call	hexdump_a		; print the current level number
+	call	puts_crlf		; and a newline
+	jp $ ;stop here
+
+.initdone:
+	ld sp,(oldstack)
+    ret
+
+; - send at least 74 CLKs
+; - send CMD0 & expect reply message = 0x01 (enter SPI mode)
+; - send CMD8 (establish that the host uses Version 2.0 SD SPI protocol)
+; - send ACMD41 (finish bringing the SD card on line)
+; - send CMD58 to verify the card is SDHC/SDXC mode (512-byte block size)
+
+;############################################################################
+; SSEL = HI (deassert)
+; wait at least 1 msec after power up
+; send at least 74 (80) SCLK rising edges
+; Clobbers A, DE, B
+;############################################################################
+sd_boot:
+	call sdraise_cs
+	ld	b,20		; (do 20 for good measure) 10*8 = 80 bits to read
+.sd_boot1:
+	push bc
+	call sdreceive_byte	; read 8 bits (causes 8 CLK xitions)
+	pop bc
+	djnz	.sd_boot1	; if not yet done, do another byte
+	ret
+
+;############################################################################
+; Send a CMD0 (GO_IDLE) message and read an R1 response.
+;
+; CMD0 will
+; 1) Establish the card protocol as SPI (if has just powered up.)
+; 2) Tell the card the voltage at which we are running it.
+; 3) Enter the IDLE state.
+;
+; Return the response byte in A.
+; Clobbers A, BC, DE, HL
+;############################################################################
+sd_cmd0:
+if .sd_debug
+	call	iputs
+	db	'CMD0: ',0
+endif	
+	ld a,040h
+	ld (.sd_scratch),a
+	xor a
+	ld (.sd_scratch+1),a
+	ld (.sd_scratch+2),a
+	ld (.sd_scratch+3),a
+	ld (.sd_scratch+4),a
+	ld a,94h|01h
+	ld (.sd_scratch+5),a
+	
+	call sdlower_cs
+	call sdcommand
+	push af
+	call sdraise_cs
+	pop af
+	; ld	hl,.sd_cmd0_buf		; HL = command buffer
+	; ld	b,.sd_cmd0_len		; B = command buffer length
+	; call	.sd_cmd_r1		; send CMD0, A=response byte
+
+if .sd_debug
+	push af
+	call	iputs
+	db	'  R1: ',0
+	pop	af
+	push	af
+	call	hexdump_a		; dump the reply message
+	call    puts_crlf
+	pop	af
+endif
+	ret
+
+; .sd_cmd0_buf:	db	0|40h,0,0,0,0,94h|01h
+; .sd_cmd0_len:	equ	$-.sd_cmd0_buf
+
+;############################################################################
+; Send a CMD8 (SEND_IF_COND) message and read an R7 response.
+;
+; Establish that we are squawking V2.0 of spec & tell the SD
+; card the operating voltage is 3.3V.  The reply to CMD8 should
+; be to confirm that 3.3V is OK and must echo the 0xAA back as
+; an extra confirm that the command has been processed properly.
+; The 0x01 in the byte before the 0xAA in the command buffer
+; below is the flag for 2.7-3.6V operation.
+;
+; Establishing V2.0 of the SD spec enables the HCS bit in
+; ACMD41 and CCS bit in CMD58.
+;
+; Clobbers A, BC, DE, HL
+; Return the 5-byte response in the buffer pointed to by DE.
+; The response should be: 0x01 0x00 0x00 0x01 0xAA.
+;############################################################################
+sd_cmd8:
+
+if .sd_debug
+	call	iputs
+	db	'CMD8: ',0
+endif	
+	ld a,8|40h
+	ld (.sd_scratch),a
+	xor a
+	ld (.sd_scratch+1),a
+	ld (.sd_scratch+2),a
+	ld a,1
+	ld (.sd_scratch+3),a
+	ld a,0AAh
+	ld (.sd_scratch+4),a
+	ld a,86h|01h
+	ld (.sd_scratch+5),a
+	
+	call sdlower_cs
+	call sdcommand
+	cp 1
+	jr nz,sdcmd8tout
+	; read R7 response (6 bytes, into .sd_scratch)
+	ld ix,.sd_scratch
+	ld b,5
+cmd8loop:
+	push bc
+	call sdreceive_byte
+	pop bc
+	ld (ix),a
+	inc ix
+	djnz cmd8loop
+	ld a,(.sd_scratch+2)	; upper nibble=PCIe support, lower nibble=voltage support
+	and 0F0h	; we ignore PCIe for now
+	cp 1
+	jr nz,sdcmd8unsup
+	; card is valid
+	xor a
+	jr sdcmd8done
+sdcmd8unsup:
+	ld a,081h
+	jr sdcmd8done
+sdcmd8tout:
+	ld a,080h
+sdcmd8done:
+if .sd_debug
+	push af
+	call	iputs
+	db	'  R7: ',0
+	ld hl,.sd_scratch
+	ld	bc,6
+	ld	e,0
+	call	hexdmp			; dump the reply message
+	pop af
+endif
+	push af
+	call sdraise_cs
+	pop af
+ret
+
+;############################################################################
+; Send a CMD55 (APP_CMD) message and read an R1 response.
+; CMD55 is used to notify the card that the following message is an ACMD
+; (as opposed to a regular CMD.)
+; Clobbers A, BC, DE, HL
+; Return the 1-byte response in A
+;############################################################################
+sd_cmd55:
+if .sd_debug
+	call	iputs
+	db	'CMD55: ',0
+endif
+	ld a,55|40h
+	ld (.sd_scratch),a
+	xor a
+	ld (.sd_scratch+1),a
+	ld (.sd_scratch+2),a
+	ld (.sd_scratch+3),a
+	ld (.sd_scratch+4),a
+	inc a
+	ld (.sd_scratch+5),a
+	
+	call sdlower_cs
+	call sdcommand
+	push af
+	call sdraise_cs
+	pop af
+
+if .sd_debug
+	push	af
+	call	iputs
+	db	' R1: ',0
+	pop	af
+	push	af
+	call	hexdump_a	; dump the response byte
+	;call    puts_crlf
+	pop	af
+endif
+	ret
+
+;############################################################################
+; Send a ACMD41 (SD_SEND_OP_COND) message and return an R1 response byte in A.
+;
+; The main purpose of ACMD41 to set the SD card state to READY so
+; that data blocks may be read and written.  It can fail if the card
+; is not happy with the operating voltage.
+;
+; Clobbers A, BC, DE, HL
+; Note that A-commands are prefixed with a CMD55.
+;############################################################################
+sd_acmd41:
+if .sd_debug
+	call	iputs
+	db	'ACMD41: ',0
+endif
+	call sd_cmd55		; send the A-command prefix
+
+	ld a,41|40h
+	ld (.sd_scratch),a
+	ld a,40h
+	ld (.sd_scratch+1),a
+	xor a
+	ld (.sd_scratch+2),a
+	ld (.sd_scratch+3),a
+	ld (.sd_scratch+4),a
+	inc a
+	ld (.sd_scratch+5),a
+	
+	call sdlower_cs
+	call sdcommand
+	push af
+	call sdraise_cs
+	pop af
+
+if .sd_debug
+	push af
+	call	iputs
+	db	'   R1: ',0
+	pop	af
+	push	af
+	call	hexdump_a	; dump the status byte
+	call    puts_crlf
+	pop	af
+endif
+	ret
+
+
+; SD spec p263 Fig 7.1 footnote 1 says we want to set the HCS bit here for HC/XC cards.
+; Notes on Internet about setting the supply voltage in ACMD41. But not in SPI mode?
+; The folowing works on my MicroCenter SDHC cards:
+
+
+;############################################################################
+; Send a CMD58 message and read an R3 response.
+; CMD58 is used to ask the card what voltages it supports and
+; if it is an SDHC/SDXC card or not.
+; Clobbers A, BC, DE, HL
+; Return the 5-byte response in the buffer pointed to by DE.
+;############################################################################
+sdcmd58:
+if .sd_debug
+	call	iputs
+	db	'CMD58: ',0
+endif
+
+	ld a,58|40h
+	ld (.sd_scratch),a
+	xor a
+	ld (.sd_scratch+1),a
+	ld (.sd_scratch+2),a
+	ld (.sd_scratch+3),a
+	ld (.sd_scratch+4),a
+	inc a
+	ld (.sd_scratch+5),a
+	
+	call sdlower_cs
+	call sdcommand
+	or a
+	jr nz,cmd58tout
+
+	; read R7 response (5 bytes, into .sd_scratch)
+	ld ix,.sd_scratch
+	ld b,5
+cm58loop:
+	push bc
+	call sdreceive_byte
+	pop bc
+	ld (ix),a
+	inc ix
+djnz cm58loop
+	xor a
+	jr cmd58done
+cmd58tout:
+	ld a,080h	; timeout
+cmd58done:
+	push af
+	call sdraise_cs
+	pop af
+if .sd_debug
+	push af
+	call	iputs
+	db	'  R3: ',0
+	ld	hl,.sd_scratch
+	ld	bc,5
+	ld	e,0
+	call hexdmp
+	pop af
+endif
+	ret
+
+
+	DSEG ; Data Segment
+.sd_scratch:	ds 6		; command buffer 
+oldstack: 		ds 256
+sdstack:		dw 0
+@dma:			dw 0
+
+
+end
