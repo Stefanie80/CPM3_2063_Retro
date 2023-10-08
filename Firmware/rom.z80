@@ -1,8 +1,10 @@
 ;##########################################################################
-; CP/M 3 BIOS for 2063 z80 retro board
+; CP/M 3 BIOS for 2063 Z80 retro board
 ;
-; Sources originally written by John Winans with contributions from Trevor Jacobs
-; Refactored for CP/M 3 by SolderGirl
+;	Sources originally written by John Winans 
+;	with contributions from Trevor Jacobs and others
+;
+; Refactored for flexible booting by SolderGirl
 ;
 ;##########################################################################
 
@@ -59,6 +61,7 @@ spriteatr	equ 03B00h	; Sprite Attributes
 
 	extrn 	fnt8x8
 	extrn 	chrW,chrH,z80bmp,bmpH
+	extrn 	sdinit, sdwrite, sdread
 	
 	; The very first step must be:
 	; Select bank 0
@@ -83,7 +86,9 @@ spriteatr	equ 03B00h	; Sprite Attributes
 	ld	sp,bios_stack		; use the private BIOS stack to get started
 	
 	call .init_console		; Init CTC & SIO
-
+	ld hl,hellostr
+	call puts
+	
 if .debug > 0
 	call	iputs
 	db	cr,lf,'BOOT',cr, lf, 0
@@ -143,7 +148,7 @@ if .debug > 0
 	db 'S',0
 endif
 .novdp:
-	call nc_init
+	call sdinit; nc_init
 
 if .debug > 0
 	call	iputs
@@ -151,17 +156,11 @@ if .debug > 0
 endif
 
 	ld bc,dskbuf
-	ld	(bios_disk_buf),bc
-	ld bc,0
-	ld	(bios_disk_track),bc
-	ld bc,3
-	ld	(bios_disk_sector),bc
-	; 1 sector = 128 Bytes = 0x80 
-	; MBR at 0x1BE is in sector 3
-	; offset = 0x1BE - (3 * 0x80) = 0x3Eh
-	call nc_read
+	ld de,0
+	ld hl,0
+	call sdread; nc_read
 	ld hl,dskbuf
-	ld de,03Eh		
+	ld de, 03Eh	+ 0180h
 	add hl,de
 	ld de,ptbl
 	ld bc,ptbllen
@@ -169,10 +168,13 @@ endif
 	ld hl,(psig)
 	ld a,h
 	cp 0AAh
-	jr z,.tbldone
+	jr nz,.tblerr
 	ld a,l
 	cp 055h
-	jr z,.tbldone
+	jr nz,.tblerr
+	jr .tbldone
+	
+.tblerr:
 	call iputs
 	db 'PTBL inval: ',cr,lf,0
 
@@ -201,12 +203,72 @@ endif
 	ld c,0FFh
 
 .found:		; C=active partition
-	push bc
+	;push bc
 	ld a,c
 	ld (.bpar),a
+	
+	; At this point, we have:
+	; SIO-A at 9600 bps as console
+	; VDP, if detected, showing the logo
+	; partition table in ptbl
+	; active partition number in .bpar
+	
+	; Now, load config block
+	call loadconf	
+	or a
+	jr z,.confgood
+	call iputs
+	db 'No valid Config,',cr,lf
+	db 'entering Setup...',cr,lf,0
+	jp runsetup
+.confgood:
+	; Print a message
+	call iputs
+	db 'Booting: ',0
+	ld bc,8
+	ld hl,title0
+	ld a,(.bpar)
+	or a
+	jr z,.pcnf0
+.pcnfa:	
+	add hl,bc
+	dec a
+	jr nz,.pcnfa
+.pcnf0:
+	; HL -> string
+	ld b,8
+.pcnfp:
+	push bc
+	ld c,(hl)
+	call con_tx_char; char in C
+	inc hl
+	pop bc
+	djnz .pcnfp
+	call puts_crlf
+	call iputs
+	db 'Press [S] for Setup, [B] for Boot Menu',cr,lf,0
 
 	; Wait for keypress here,
-	; Jump to menu
+	ld bc,0FFFFh 	; timeout counter
+.bwait:
+	push bc
+	xor a
+	call con_rx_ready
+	call nz,con_rx_char ; get char in A
+	cp 'S'
+	jp z,runsetup
+	cp 's'
+	jp z,runsetup
+	cp 'B'
+	jp z,domenu
+	cp 'b'
+	jp z,domenu
+	pop bc
+	dec bc
+	ld a,b
+	or c
+	jr nz,.bwait
+	; fall through for autoboot
 	
 if .debug > 0
 	push bc
@@ -221,23 +283,26 @@ if .debug > 0
 	ld	e,1		; fancy format
 	call	hexdmp
 endif
-	
-	pop bc
+
+do_boot:	
 	ld de,16
 	ld iy,p0str
-	ld a,c
+	ld a,(.bpar)
+	ld b,a
 	or a
 	jr z,.par0
 .pst:
 	add iy,de
-	dec c
-	jr nz,.pst
+	djnz .pst
 .par0:
-	; IX -> Pstart of active part
+	; IY -> Pstart of active part
 	ld l,(iy)
 	ld h,(iy+1)
+	ld (hlreg),hl
 	ld e,(iy+2)
 	ld d,(iy+3)
+	ld (dereg),de
+	call loadregs	; some will be clobbered
 	ld iy,0C000h	; store the target
 	ld c,32
 	call .bootmsg
@@ -248,8 +313,8 @@ endif
 	push	de			; 32-bit SD block number (big end)
 	push	hl			; 32-bit SD block number (little end)
 	push 	iy
-	pop 	de			; DE = target buffer to read the 512-byte block
-	call	sd_cmd17	; read the SD block
+	pop 	bc			; DE = target buffer to read the 512-byte block
+	call	sdread		; read the SD block
 	ld 		de,512
 	add 	iy,de
 	pop		hl			; clean the SD block number from the stack
@@ -276,12 +341,1168 @@ if .debug > 0
 	call	hexdmp
 endif
 
-	ld a,(.bpar)
-	ld c,a
-	ld a,1
+	call loadregs	; make sure we hand over all
+	ld a,081h
 	jp 0C000h
 
 	jp $ ; spin in place for debug
+
+saveconf:
+	; First, load config block
+	ld bc,dskbuf
+	ld de,00h
+	ld hl,007FFh
+	; 1 sector = 128 Bytes = 0x80 
+	call sdread
+	; Now, copy in the config 
+	ld de,dskbuf+0180h
+	ld hl,conf0
+	ld b,127
+	xor a
+sconfloop:
+	push af
+	ld a,(hl)
+	ld (de),a
+	pop af
+	add a,(hl)
+	inc hl
+	inc de
+	djnz sconfloop
+	; now, save the checksum
+	ld (de),a
+	; and save the block back
+	ld bc,dskbuf
+	ld de,00h
+	ld hl,007FFh
+	; 1 sector = 128 Bytes = 0x80 
+	call sdwrite	
+ret
+
+loadconf:
+	; Now, load config block
+	ld bc,dskbuf
+	ld de,00h
+	ld hl,007FFh
+	; 1 sector = 128 Bytes = 0x80 
+	call sdread
+		
+	ld hl,dskbuf
+	ld de,0180h
+	add hl,de
+	xor a
+	ld b,127
+.confchk:
+	add a,(hl)
+	inc hl
+	djnz .confchk
+	cp (hl)
+	jr nz,.confcfail
+	dec hl
+	ld a,(hl)
+	cp 0AAh
+	jr nz,.confcinval
+	; at this point, we have a valid config Block
+	; in the buffer. Lets copy it to the label
+	ld hl,dskbuf
+	ld de,0180h
+	add hl,de	
+	ld de,config
+	ld bc,128
+	ldir
+	; check for boot override
+	ld a,(bovrrd)
+	and 080h
+	jr z,.noovr
+	; override flag is set, change (.bpar)
+	ld a,(bovrrd)
+	and 003h
+	;ld (.bpar),a
+.noovr:	
+	
+	xor a
+	jr .creaddone
+.confcfail:		; checksum failed
+	call iputs
+	db 'Config Checksum Error!',cr,lf,0
+	ld a,080h
+	jr .creaddone
+.confcinval:	; Signature failed	
+	call iputs
+	db 'Config Invalid!',cr,lf,0
+	ld a,081h
+	;jr .creaddone
+.creaddone:
+ret
+
+runsetup:
+	pop bc	; fix stack
+	; print menu title
+	ld hl,mtitle
+	call puts
+	; print list of config titles
+	call printlist
+	; print override status
+	call iputs
+	db cr,lf,'   Override: ',0
+	ld a,(bovrrd)
+	and 07Fh	; mask out the enable bit
+	inc a		; looks prettier
+	call hexdump_a
+	ld a,(bovrrd)
+	and 080h	; this time, only get the enable bit
+	jr z,ovrdis
+	call iputs
+	db ' Enabled',cr,lf,0
+	jr ovrdone
+ovrdis:
+	call iputs
+	db ' Disabled',cr,lf,0
+ovrdone:
+	; print menu
+	ld hl,mopts
+	call puts
+
+	call puts_crlf
+	call iputs
+	db 'Your choice: ',0
+	call con_rx_char	;char in A
+	push af
+	ld c,a
+	call con_tx_char
+	call puts_crlf
+	pop af
+	cp '0'
+	jr nz,.snotzero
+	jp 0	; Just restart 
+	.snotzero:
+	cp '1'
+	jr nz,.snotone
+	ld a,0
+	jp edconf
+	.snotone:
+	cp '2'
+	jr nz,.snottwo
+	ld a,1
+	jp edconf
+	.snottwo:
+	cp '3'
+	jr nz,.snotthree
+	ld a,2
+	jp edconf
+	.snotthree:
+	cp '4'
+	jr nz,.snotfour
+	ld a,3
+	jp edconf
+	.snotfour:
+	cp '8'
+	jr nz,.snoteight
+	call setovr
+	jp runsetup
+	.snoteight:
+	cp '9'
+	jr nz,.snotnine
+	call saveconf	; save config to disk
+	call loadconf	; reload 
+	jp runsetup		; return to setup
+	.snotnine:
+	cp '?'
+	jr nz,.nothelp
+	ld hl,helpstr
+	call puts
+	call con_rx_char
+	ld hl,helpstr1
+	call puts
+	call con_rx_char
+	jp runsetup
+	.nothelp:
+	jp runsetup ; back to menu
+
+setovr:
+	call iputs
+	db 'New Override [1..4]: ',0
+oget:
+	call con_rx_char
+	cp '1'
+	jr nz,on0
+		ld c,a
+		call con_tx_char
+		ld a,(bovrrd)
+		and 080h ; keep flag
+		; value 0
+		ld (bovrrd),a
+		jp ogena
+	on0:
+	cp '2'
+	jr nz,on1
+		ld c,a
+		call con_tx_char
+		ld a,(bovrrd)
+		and 080h ; keep flag
+		or 1 ; value 1
+		ld (bovrrd),a
+		jp ogena
+	on1:
+	cp '3'
+	jr nz,on2
+		ld c,a
+		call con_tx_char
+		ld a,(bovrrd)
+		and 080h ; keep flag
+		or 2; value 2
+		ld (bovrrd),a
+		jp ogena
+	on2:
+	cp '4'
+	jr nz,on3
+		ld c,a
+		call con_tx_char
+		ld a,(bovrrd)
+		and 080h ; keep flag
+		or 3 ; value 3
+		ld (bovrrd),a
+		jp ogena
+	on3:
+	jp oget
+	call puts_crlf
+
+ogena:	
+	call iputs
+	db cr,lf,'Enable Override? [Y/N]: ',0
+ogete:
+	call con_rx_char
+	cp 'y'
+	jr nz,ony
+		ld c,'Y'
+		call con_tx_char
+		ld a,(bovrrd)
+		or 080h	; set flag
+		ld (bovrrd),a
+		ret	
+	ony:
+	cp 'Y'
+	jr nz,onyy
+		ld c,'Y'
+		call con_tx_char
+		ld a,(bovrrd)
+		or 080h	; set flag
+		ld (bovrrd),a
+		ret	
+	onyy:
+	cp 'n'
+	jr nz,onn
+		ld c,'N'
+		call con_tx_char
+		ld a,(bovrrd)
+		and 07Fh	; reset flag
+		ld (bovrrd),a
+		ret	
+	onn:
+	cp 'N'
+	jr nz,onnn
+		ld c,'N'
+		call con_tx_char
+		ld a,(bovrrd)
+		and 07Fh	; reset flag
+		ld (bovrrd),a
+		ret	
+	onnn:
+	jp ogete
+ovrret:	
+ret
+
+edconf:		; get config number in A
+	ld (ednum),a
+	call printconf
+	ld hl,edmenu
+	call puts
+	call con_rx_char	;char in A
+	push af
+	ld c,a
+	call con_tx_char
+	call puts_crlf
+	pop af
+	cp '0'
+	jr nz,.ednotzero
+		jp runsetup
+	.ednotzero:
+	cp '1'
+	jr nz,.ednotone
+		ld a,(ednum)
+		jp newtitle
+	.ednotone:
+	cp '2'
+	jr nz,.ednottwo
+		ld a,(ednum)
+		jp newpart
+	.ednottwo:
+	cp '3'
+	jr nz,.ednotthree
+		ld a,(ednum)
+		jp newbaud
+	.ednotthree:
+	cp '4'
+	jr nz,.ednotfour
+		; get new LBA
+		ld a,(ednum)
+		call newLBA
+		ld a,(ednum)
+		jp edconf
+	.ednotfour:
+	cp '5'
+	jr nz,.ednotfive
+		ld hl,(eccon)
+		ld de,12
+		add hl,de
+		push hl
+		call getvect	; returns new vector in DE
+		pop hl
+		ld (hl),e
+		inc hl
+		ld (hl),d
+		ld a,(ednum)
+		jp edconf
+	.ednotfive:
+	cp '6'
+	jr nz,.ednotsix
+		ld hl,(eccon)
+		ld de,14
+		add hl,de
+		push hl
+		call getvect	; returns new vector in DE
+		pop hl
+		ld (hl),e
+		inc hl
+		ld (hl),d
+		ld a,(ednum)
+		jp edconf
+	.ednotsix:
+
+	ld a,(ednum)
+jp edconf
+
+
+newLBA:
+	call iputs
+	db 'Enter 32bit LBA Adress: 0x',0
+	ld b,4 ; read 4x2 nibbles
+	ld hl,lbabuff
+lrnib:
+	push bc
+	call gethex
+	call printnib
+	rla
+	rla
+	rla
+	rla
+	and 0F0h
+	ld (hl),a	; store high nibble
+	call gethex
+	call printnib
+	and 00Fh	; mask away high nibble
+	or (hl)		; complete the byte
+	ld (hl),a	; and save
+	inc hl		; next byte
+	pop bc
+	djnz lrnib
+	; lbabuff = new adress
+	
+	ld iy,lbabuff
+	ld hl,(eccon) 	; conf base
+	inc hl
+	inc hl	; HL -> Offset field
+	push hl
+	pop ix
+	
+	; load it so that it works
+	ld a,(iy+2)
+	ld (ix+3),a
+	ld a,(iy+3)
+	ld (ix+2),a
+	ld a,(iy)
+	ld (ix+1),a
+	ld a,(iy+1)
+	ld (ix),a
+ret
+
+
+
+printnib:
+	push af
+	push bc
+	; input in A
+	add a,'0'
+	cp '9'+1
+	jp	m,prnnib
+	add	'A'-'9'-1
+prnnib:
+	ld c,a
+	call con_tx_char	   ; tail
+	pop bc
+	pop af
+ret
+
+
+
+getvect:
+	call iputs
+	db cr,lf,'New Vector: 0x',0
+	; read 4 hex digits from CON
+	ld b,4
+	ld hl,vecbuff
+gvloop0:
+	push bc
+gvget:
+	call gethex
+	cp 080h
+	jr z,gvget	; keep trying
+	ld (hl),a
+	call printnib
+	inc hl
+	pop bc
+	djnz gvloop0
+	call puts_crlf
+	call puts_crlf
+	; return 16 bit value in DE
+	ld hl,vecbuff
+	ld a,(hl)
+	rla
+	rla
+	rla
+	rla
+	and 0F0h
+	inc hl
+	or (hl)
+	ld d,a		; D = high byte
+	inc hl
+	ld a,(hl)
+	rla
+	rla
+	rla
+	rla
+	and 0F0h
+	inc hl
+	or (hl)
+	ld e,a		; E = Low byte
+ret
+
+bdbuff: dw 0
+
+newbaud:
+	; Set new baud rates
+	ld hl,(eccon)
+	ld d,(hl)
+	; D = Baudrates
+	ld a,d
+	rra
+	rra
+	rra
+	rra
+	and 00Fh
+	ld b,a
+	ld a,d
+	and 00Fh
+	ld c,a
+	; B=SIO-A, C=SIO-B
+	ld (bdbuff),bc
+
+
+	; Change SIO-A
+	call iputs
+	db 'SIO-A currently set to: ',0
+	ld bc,(bdbuff)
+	ld a,b
+	call hexdump_a
+	call printbaud	; takes baud index in A
+	call iputs
+	db cr,lf,'New value for SIO-A [1..F]: ',0
+sioanb:	
+	call gethex ; returns a hex digit in A	(error if >=80h)
+	cp 080h
+	jr z,sioanb	; keep asking until valid
+	call hexdump_a
+	push af
+	call printbaud	; takes baud index in A
+	call puts_crlf
+	pop af
+	ld bc,(bdbuff)
+	ld b,a
+	ld (bdbuff),bc
+	; SIO-A done
+	
+	; Change SIO-B
+	call iputs
+	db 'SIO-B currently set to: ',0
+	ld bc,(bdbuff)
+	ld a,c
+	call hexdump_a
+	call printbaud	; takes baud index in A
+	call iputs
+	db cr,lf,'New value for SIO-B [1..F]: ',0
+siobnb:	
+	call gethex ; returns a hex digit in A	(error if >=80h)
+	cp 080h
+	jr z,siobnb	; keep asking until valid
+	call hexdump_a
+	push af
+	call printbaud	; takes baud index in A
+	call puts_crlf
+	pop af
+	ld bc,(bdbuff)
+	ld c,a
+	;ld (bdbuff),bc
+	; SIO-B done
+	
+	; new values now in B,C
+	; Mash them back together
+	ld a,b
+	rla
+	rla
+	rla
+	rla
+	and 0F0h
+	; A=B<<4
+	or c
+	; A = new combined byte
+	ld hl,(eccon)
+	ld (hl),a
+	call hexdump_a
+nbdone:
+	call puts_crlf
+	ld a,(ednum)
+jp edconf
+
+
+gethex:
+	; get a single hex digit from con
+	; return 080h if invalid
+	call con_rx_char
+	cp '0'
+	jr nz,ghnot0
+		; Key = 0
+		ld a,0
+		jp ghret
+	ghnot0:
+	cp '1'
+	jr nz,ghnot1
+		; Key = 1
+		ld a,1
+		jp ghret
+	ghnot1:
+	cp '2'
+	jr nz,ghnot2
+		; Key = 2
+		ld a,2
+		jp ghret
+	ghnot2:
+	cp '3'
+	jr nz,ghnot3
+		; Key = 3
+		ld a,3
+		jp ghret
+	ghnot3:
+	cp '4'
+	jr nz,ghnot4
+		; Key = 4
+		ld a,4
+		jp ghret
+	ghnot4:
+	cp '5'
+	jr nz,ghnot5
+		; Key = 5
+		ld a,5
+		jp ghret
+	ghnot5:
+	cp '6'
+	jr nz,ghnot6
+		; Key = 6
+		ld a,6
+		jp ghret
+	ghnot6:
+	cp '7'
+	jr nz,ghnot7
+		; Key = 7
+		ld a,7
+		jp ghret
+	ghnot7:
+	cp '8'
+	jr nz,ghnot8
+		; Key = 8
+		ld a,8
+		jp ghret
+	ghnot8:
+	cp '9'
+	jr nz,ghnot9
+		; Key = 9
+		ld a,9
+		jp ghret
+	ghnot9:
+	cp 'a'
+	jr nz,ghnota
+		; Key = a
+		ld a,10
+		jp ghret
+	ghnota:
+	cp 'A'
+	jr nz,ghnotaa
+		; Key = A
+		ld a,10
+		jp ghret
+	ghnotaa:
+	cp 'b'
+	jr nz,ghnotb
+		; Key = b
+		ld a,11
+		jp ghret
+	ghnotb:
+	cp 'B'
+	jr nz,ghnotbb
+		; Key = B
+		ld a,11
+		jp ghret
+	ghnotbb:
+	cp 'c'
+	jr nz,ghnotc
+		; Key = c
+		ld a,12
+		jp ghret
+	ghnotc:
+	cp 'C'
+	jr nz,ghnotcc
+		; Key = C
+		ld a,12
+		jp ghret
+	ghnotcc:
+	cp 'd'
+	jr nz,ghnotd
+		; Key = d
+		ld a,13
+		jp ghret
+	ghnotd:
+	cp 'D'
+	jr nz,ghnotdd
+		; Key = D
+		ld a,13
+		jp ghret
+	ghnotdd:
+	cp 'e'
+	jr nz,ghnote
+		; Key = e
+		ld a,14
+		jp ghret
+	ghnote:
+	cp 'E'
+	jr nz,ghnotee
+		; Key = E
+		ld a,14
+		jp ghret
+	ghnotee:
+	cp 'f'
+	jr nz,ghnotf
+		; Key = f
+		ld a,15
+		jp ghret
+	ghnotf:
+	cp 'F'
+	jr nz,ghnotff
+		; Key = F
+		ld a,15
+		jp ghret
+	ghnotff:
+	ld a,080h
+ghret:	
+ret
+
+
+newpart:
+	; Set new partition
+	call iputs
+	db 'Enter new partition (1-4): ',0
+	call con_rx_char	;char in A
+	push af
+	ld c,a
+	call con_tx_char
+	call puts_crlf
+	pop af
+	cp '1'
+	jr nz,.npnotone
+		; set to P0
+		xor a
+		call setnewpart
+		jp npdone
+	.npnotone:
+	cp '2'
+	jr nz,.npnottwo
+		; set to P1
+		ld a,1
+		call setnewpart
+		jp npdone
+	.npnottwo:
+	cp '3'
+	jr nz,.npnotthree
+		; set to P2
+		ld a,2
+		call setnewpart
+		jp npdone
+	.npnotthree:
+	cp '4'
+	jr nz,.npnotfour
+		; set to P3
+		ld a,3
+		call setnewpart
+		jp npdone
+	.npnotfour:
+		; invalid
+		call iputs
+		db 'Invalid!',cr,lf,0
+npdone:
+	call puts_crlf
+	ld a,(ednum)
+jp edconf
+
+setnewpart:
+	; set config in (ednum) to partition in A
+	ld b,a
+	push af
+	ld hl,p0str
+	or a
+	jr z, newp0
+
+	ld de,16
+newploop:
+	add hl,de
+	djnz newploop
+	
+newp0:
+	pop af
+	; HL -> Pstart
+	; A = Pnum
+	; (eccon) -> current config
+	push hl
+	ld hl,(eccon)
+	inc hl
+	ld (hl),a	; Pnum loaded
+	inc hl		; HL -> offset field in conf
+	push hl
+	pop ix		; IX -> offset field in conf
+	pop iy		; IY -> Pstart
+
+	
+	ld a,(iy+2)
+	ld (ix),a
+	ld a,(iy+3)
+	ld (ix+1),a
+	ld a,(iy)
+	ld (ix+2),a
+	ld a,(iy+1)
+	ld (ix+3),a
+
+ret
+
+newtitle:
+	call iputs
+	db cr,lf,'New Title: ',0
+	; Enter new Title for config in ednum
+	ld a,(ednum)
+	ld hl,title0
+	or a
+	jr z,nti0
+	ld de,8
+	ld a,(ednum)
+	ld b,a
+ntil0:
+	add hl,de
+	djnz ntil0
+nti0:
+	; HL -> title
+	ld b,8		; 8 charactes max
+ntnext:
+	push bc
+	call con_rx_char	; cahr in A
+	cp 0Dh	; enter key
+	jr z,ntendstr
+	ld (hl),a
+	ld c,a
+	call con_tx_char
+	inc hl
+	pop bc
+	djnz ntnext
+	jr ntdone
+
+ntendstr:
+	; String was ended by enter key
+	; pad out with spaces
+	ld a,' '
+ntpad:
+	ld (hl),a
+	inc hl
+	djnz ntpad
+
+ntdone:
+	call puts_crlf
+	ld a,(ednum)
+jp edconf
+
+
+printconf:	; get config number in A
+	ld (ecnum),a
+	call iputs
+	db 'Editing Config #',0
+	ld a,(ecnum)
+	call hexdump_a
+	call puts_crlf
+
+	call iputs
+	db '   Title: ',0
+	ld hl,title0
+	ld a,(ecnum)
+	or a
+	jr z,eczer0
+	ld a,(ecnum)
+	ld b,a
+	ld de,8
+ecloo0:
+	add hl,de
+	djnz ecloo0
+eczer0:	
+	ld (ectit),hl
+	call printstr8
+	call puts_crlf
+
+	call iputs
+	db '   Partition:  ',0
+	ld hl,conf0
+	ld a,(ecnum)
+	or a
+	jr z,eczer1
+	ld a,(ecnum)
+	ld b,a
+	ld de,16
+ecloo1:
+	add hl,de
+	djnz ecloo1
+eczer1:	
+	; HL -> current conf
+	ld (eccon),hl
+	ld d,(hl)
+	inc hl
+	ld e,(hl)
+	; E = Partition number
+	; D = Baudrates
+	push de
+	ld a,e
+	call hexdump_a
+	call puts_crlf
+	call iputs
+	db '   SIO-A Baud: ',0
+	pop de
+	push de
+	ld a,d
+	rra
+	rra
+	rra
+	rra
+	and 0Fh
+	push af
+	call hexdump_a
+	pop af
+	call printbaud
+	call puts_crlf
+	call iputs
+	db '   SIO-B Baud: ',0
+	pop de
+	ld a,d
+	and 0Fh
+	push af
+	call hexdump_a
+	pop af
+	call printbaud
+	call puts_crlf
+	
+	; Print offset
+	call iputs
+	db '   LBA Offset: 0x',0
+	ld hl,(eccon)
+	inc hl
+	inc hl
+	; hexdump 4 bytes
+	ld a,(hl)
+	push af
+	inc hl
+	ld a,(hl)
+	call hexdump_a
+	pop af
+	call hexdump_a
+
+	inc hl
+	ld a,(hl)
+	push af
+	inc hl
+	ld a,(hl)
+	call hexdump_a
+	pop af
+	call hexdump_a
+	inc hl
+	call puts_crlf
+	
+	; Print vectors
+	call iputs
+	db '   IX (COVEC): 0x',0
+	ld hl,(eccon)
+	ld de,12
+	add hl,de
+	ld a,(hl)
+	push af
+	inc hl
+	ld a,(hl)
+	call hexdump_a
+	pop af
+	call hexdump_a
+	call puts_crlf
+	
+	call iputs
+	db '   IY (CIVEC): 0x',0
+	ld hl,(eccon)
+	ld de,14
+	add hl,de
+	ld a,(hl)
+	push af
+	inc hl
+	ld a,(hl)
+	call hexdump_a
+	pop af
+	call hexdump_a
+	call puts_crlf
+ret
+
+printbaud:	; takes baud index in A
+	add a,a	; double up
+	ld hl,baudstrv
+	ld de,0
+	ld e,a
+	add hl,de
+	; HL -> string pointer
+	ld e,(hl)
+	inc hl
+	ld d,(hl)
+	push de
+	pop hl
+	; HL -> String
+	call puts
+ret
+
+domenu:
+	pop bc	; fix stack
+	; print list of config titles
+	call printlist
+	; wait for key
+.dowaitk:
+	call puts_crlf
+	call iputs
+	db 'Your choice: ',0
+	call con_rx_char	;char in A
+	push af
+	ld c,a
+	call con_tx_char
+	call puts_crlf
+	pop af
+	; if key = 0..3, boot that config/partition
+	cp '1'
+	jr nz,.notone
+	ld a,080h
+	ld (bovrrd),a
+	jp do_boot
+	.notone:
+	cp '2'
+	jr nz,.nottwo
+	ld a,081h
+	ld (bovrrd),a
+	jp do_boot
+	.nottwo:
+	cp '3'
+	jr nz,.notthree
+	ld a,082h
+	ld (bovrrd),a	
+	jp do_boot
+	.notthree:
+	cp '4'
+	jr nz,.notfour
+	ld a,083h
+	ld (bovrrd),a
+	jp do_boot
+	.notfour:
+	; else, complain and keep waiting
+	call iputs
+	db 'Invalid Input!',cr,lf,0
+	jr .dowaitk
+	
+	jp $ ; spin in place for debug
+
+loadregs:
+	; load *ALL* registers 
+	; (.bpar) 	= Active Partition
+	; (bovrrd)	= Override Byte
+	ld a,(bovrrd)
+	and 080h
+	jp z,actboot
+	; override mode
+		ld a,(bovrrd)
+		and 03h	; mask out garbage
+		call ldregs
+	jp regsdone
+	actboot: 
+	; not override, boot active partition
+	call actpart	; make sure (hlreg) and (dereg) are loaded
+	ld a,(.bpar)
+	and 03h	; mask out garbage
+	call ldregs
+	; now overwrite from partition
+	ld a,(.bpar)
+	ld c,a
+	ld de,(dereg)
+	ld hl,(hlreg)
+regsdone:
+ret
+
+actpart:
+	ld de,16
+	ld iy,p0str
+	ld a,(.bpar)
+	ld b,a
+	or a
+	jr z,.apar0
+.apst:
+	add iy,de
+	djnz .apst
+.apar0:
+	; IY -> Pstart of active part
+	ld l,(iy)
+	ld h,(iy+1)
+	ld (hlreg),hl
+	ld e,(iy+2)
+	ld d,(iy+3)
+	ld (dereg),de
+ret
+
+ldregs:
+	; conf num in A
+	cp 0
+	jp nz,ncnf0
+	; Load conf0
+	exx
+	ld bc,(c0BCs)
+	ld de,(c0DEs)
+	ld hl,(c0HLs)
+	exx
+	ld bc,(c0BC)
+	ld de,(c0DE)
+	ld hl,(c0HL)
+	ld ix,(c0IX)
+	ld iy,(c0IY)	
+	ret
+	ncnf0:
+	cp 1
+	jp nz,ncnf1
+	; Load conf1
+	exx
+	ld bc,(c1BCs)
+	ld de,(c1DEs)
+	ld hl,(c1HLs)
+	exx
+	ld bc,(c1BC)
+	ld de,(c1DE)
+	ld hl,(c1HL)
+	ld ix,(c1IX)
+	ld iy,(c1IY)	
+	ret
+	ncnf1:
+	cp 2
+	jp nz,ncnf2
+	; Load conf2
+	exx
+	ld bc,(c2BCs)
+	ld de,(c2DEs)
+	ld hl,(c2HLs)
+	exx
+	ld bc,(c2BC)
+	ld de,(c2DE)
+	ld hl,(c2HL)
+	ld ix,(c2IX)
+	ld iy,(c2IY)	
+	ret
+	ncnf2:
+	; Load conf3
+	exx
+	ld bc,(c3BCs)
+	ld de,(c3DEs)
+	ld hl,(c3HLs)
+	exx
+	ld bc,(c3BC)
+	ld de,(c3DE)
+	ld hl,(c3HL)
+	ld ix,(c3IX)
+	ld iy,(c3IY)	
+ret
+
+
+printlist:
+	call puts_crlf
+	ld hl,str_list1
+	call printstr8
+	ld hl,title0
+	call printstr8	; config 0 title
+	ld a,(.bpar)
+	or a
+	jr nz,.pl0
+		ld hl,str_active
+		call printstr8
+	.pl0:
+	call puts_crlf
+	ld hl,str_list2
+	call printstr8
+	ld hl,title1
+	call printstr8	; config 1 title
+	ld a,(.bpar)
+	cp 1
+	jr nz,.pl1
+		ld hl,str_active
+		call printstr8
+	.pl1:
+	call puts_crlf
+	ld hl,str_list3
+	call printstr8
+	ld hl,title2
+	call printstr8	; config 2 title
+	ld a,(.bpar)
+	cp 2
+	jr nz,.pl2
+		ld hl,str_active
+		call printstr8
+	.pl2:
+	call puts_crlf
+	ld hl,str_list4
+	call printstr8
+	ld hl,title3
+	call printstr8	; config 3 title
+	ld a,(.bpar)
+	cp 3
+	jr nz,.pl3
+		ld hl,str_active
+		call printstr8
+	.pl3:
+	call puts_crlf
+ret
+
+printstr8:
+	ld b,8
+.pstr8:
+	ld c,(hl)
+	push bc
+	call con_tx_char
+	pop bc
+	inc hl
+	djnz .pstr8
+ret
 
 .bootmsg:
 	; report the partition number and block address
@@ -300,7 +1521,7 @@ endif
 	ld a,(.bpar)
 	call hexdump_a
 	call iputs
-	db ': 0x',0
+	db ' @LBA 0x',0
 
 	pop hl
 	push hl
@@ -328,25 +1549,6 @@ endif
 	pop 	de
 	pop 	bc
 	ret
-
-
-	
-	; At this point, the VDP should be in Mode 2 with ANSI Font loaded
-	; Lets display a logo in the upper 3rd of the screen
-	
-	; Somehow read MBR and check for partitions
-	; Then, use BDOS to check for files
-	; CPM3.SYS is obvious
-	; CP/M 2.2 won't have that, but live at partition base
-	; The official Firmware has the String "Z80 Retro Board 2063"
-	; Plus version info within the first 0x100 bytes
-	; At least 2 versions have it at exactly 0x9F
-	; From all that, build a list of bootable devices
-	; And display it in a fancy manner
-
-
-	; Display a hello world message.
-
 
 if .debug >= 3
 	; dump the zero-page for reference
@@ -396,103 +1598,6 @@ sioa_rx_char:
 	in	a,(sio_ad)
 	ret
 	
-
-;##########################################################################
-;
-; CP/M 2.2 Alteration Guide p19:
-; Register BC contains the track number for subsequent disk
-; accesses on the currently selected drive.  BC can take on
-; values from 0-65535.
-;
-;##########################################################################
-.bios_settrk:
-	ld	(bios_disk_track),bc
-
-if .debug >= 2
-	call	iputs
-	db	'.bios_settrk entered: ',0
-	call	bios_debug_disk
-endif
-	ret
-
-;##########################################################################
-;CP/M 3 System Manual Page 42/43
-;BIOS Function 9: SELDSK
-;Select the Specified Disk Drive
-;Entry Parameters:
-;C=Disk Drive (0-15)
-;E=Initial Select Flag
-;Returned Values:
-;HL=Address of Disk Parameter
-;Header (DPH) if drive exists
-;HL=0000H if drive does not exist
-;##########################################################################
-.bios_seldsk:
-	ld	a,c
-	ld	(bios_disk_disk),a
-; XXX should we save this now or defer till after we validate the value?
-if .debug >= 2
-	call	iputs
-	db	'.bios_seldsk entered: ',0
-	call	bios_debug_disk
-endif
-
-	ld	hl,0			; HL = 0 = invalid disk
-	ld	a,(bios_disk_disk)
-	or	a			; did drive A get selected?
-	ret	nz			; no -> error
-
-	ld	hl,.bios_dph		; the DPH for disk A
-	ret
-
-;##########################################################################
-;CP/M 3 System Manual Page 43
-;BIOS Function 11: SETSEC
-;Set Specified Sector Number
-;Entry Parameters:
-;BC=Sector Number
-;Returned Values: None
-;Register BC contains the sector number for the subsequent disk access on
-;the currently selected drive. This number is the value returned by SECTRN.
-;Usually, you delay actual sector selection until a READ or WRITE
-;operation occurs.
-;##########################################################################
-.bios_setsec:
-	ld	(bios_disk_sector),bc
-
-if .debug >= 2
-	call	iputs
-	db	'.bios_setsec entered: ',0
-	call	bios_debug_disk
-endif
-
-	ret
-
-;##########################################################################
-;CP/M 3 System Manual Page 44
-;BIOS Function 12: SETDMA
-;Set Address for Subsequent Disk I/O
-;Entry Parameters:
-;BC=Direct Memory Access Address
-;Returned Values: None
-;Register BC contains the DMA (Direct Memory Access) address for the
-;subsequent READ or WRITE operation.
-;For example, if B = 00H and C = 80H when the BDOS calls SETDMA,
-;then the subsequent read operation reads its data starting at 80H, or
-;the subsequent write operation gets its data from 80H, until the next
-;call to SETDMA occurs.
-;##########################################################################
-.bios_setdma:
-	ld	(bios_disk_buf),bc
-
-if .debug >= 2
-	call	iputs
-	db	'.bios_setdma entered: ',0
-	call	bios_debug_disk
-endif
-
-	ret
-
 ;##########################################################################
 ; Initialize the console port.  Note that this includes CTC port 1.
 ;##########################################################################
@@ -522,12 +1627,13 @@ endif
 ; instruction invoking this subroutine to the console.
 ; Clobbers AF, C
 ;##############################################################
+	public iputs
 iputs:
-        ex      (sp),hl                 ; hl = @ of string to print
-	call	.puts_loop
-        inc     hl                      ; point past the end of the string
-        ex      (sp),hl
-        ret
+	ex (sp),hl                 ; hl = @ of string to print
+	call .puts_loop
+	inc hl                      ; point past the end of the string
+	ex (sp),hl
+ret
 
 ;##############################################################
 ; Write the null-terminated staring starting at the address in
@@ -541,25 +1647,30 @@ puts:
 	ret
 
 .puts_loop:
-        ld      a,(hl)                  ; get the next byte to send
-        or      a
-        jr      z,.puts_done             ; if A is zero, return
-        ld      c,a
-        call    con_tx_char
-        inc     hl                      ; point to next byte to write
-        jp      .puts_loop
+	ld      a,(hl)                  ; get the next byte to send
+	or      a
+	jr      z,.puts_done             ; if A is zero, return
+	ld      c,a
+	call    con_tx_char
+	inc     hl                      ; point to next byte to write
+	jp      .puts_loop
 .puts_done:
-        ret
+    ret
 
 		
 ;##############################################################
 ; Print a CRLF
-; Clobbers AF, C
+; Clobbers AF
 ;##############################################################
+	public puts_crlf
 puts_crlf:
-        call    iputs
-        db    cr,lf,0 	;'wtf \r\n\0'
-        ret
+	push bc
+	ld c,cr
+	call con_tx_char
+	ld c,lf
+	call con_tx_char
+	pop bc
+ret
 
 vdp_init:
 if .debug_vdp > 0
@@ -860,6 +1971,7 @@ fill_screen:
 ; Print the value in A in hex
 ; Clobbers C
 ;#############################################################################
+	public hexdump_a
 hexdump_a:
 	push	af
 	srl	a
@@ -994,6 +2106,7 @@ vdp_string:
 ; if E is zero, no fancy formatting
 ; Does not clobber any registers
 ;#############################################################################
+	public hexdmp
 hexdmp:
 	push	af
 	push	de
@@ -1053,9 +2166,6 @@ hexdmp:
 
 DSEG
 
-dskbuf:
-	ds 128
-
 .vdpinit:
 			db	00000010b,080h	; R0 = Graphics II, no EXT video
 			db	11000000b,081h	; R1 = 16K RAM, enable display, disable INT, 8x8 sprites, mag off
@@ -1075,13 +2185,24 @@ screenlen  equ	$-iscreen	; number of bytes to write
 ; General storage space
 ;##########################################################################
 
+	public gpiocache
+gpiocache equ gpio_out_cache
+
 gpio_out_cache:		db	0fh + (.low_bank<<4)
-bios_disk_track: 	dw 0
-bios_disk_sector: 	dw 0
-bios_disk_buf:		dw 0
-bios_disk_disk: 	db 0
 bios_stk:			ds 128
 bios_stack:			db 0
+.bpar: db 0	
+bcreg:	dw 0
+dereg:	dw 0
+hlreg:	dw 0
+ixreg:	dw 0
+iyreg:	dw 0
+ednum: db 0
+ecnum: db 0
+eccon: dw 0
+ectit: dw 0
+lbabuff: ds 4
+vecbuff: ds 4
 
 	
 ;##############################################################
@@ -1101,45 +2222,9 @@ bios_stack:			db 0
 ; Disk stuff below here
 ;##########################################################################
 
-; NOTE: since we are in the bootloader, we do not need a full XDPH
-; The DPH we provide however must meet the specifications in the CP/M 3 System Guide
+dskbuf:
+	ds 512
 
-.bios_dph:
-	dw	0			; XLT sector translation table (no xlation done)
-	dw	0,0,0,0		; scratchpad
-	db  0			; scratch
-	db 	0			; media flag
-	dw	.bios_dpb_a	; DPB pointer
-	dw	0			; CSV pointer (optional, not implemented)
-	dw	.bios_alv_a	; ALV pointer
-	dw	.bios_dirbuf	; DIRBUF pointer
-	dw	.bios_datbuf	; dtabcb
-	dw	0FFFFh		; HASH disable hashing for now
-	dw	0			; HBANK
-	
-.bios_dirbuf:
-	ds	128		; scratch directory buffer
-.bios_datbuf:
-	ds	128		; scratch directory buffer
-
-.bios_dpb_a:
-	dw	4		; SPT
-	db	6		; BSH
-	db	63		; BLM
-	db	3		; EXM
-	dw	1021	; DSM (max allocation block number)
-	dw	511		; DRM
-	db	0c0h	; AL0
-	db	0		; AL1
-	dw	8000h 	; CKS
-	dw	32		; OFF
-	db	0		; PSH
-	db	0		; PHM
-
-
-.bios_alv_a:
-	ds	(4087/8)+1,0aah	; scratchpad used by BDOS for disk allocation info
-.bios_alv_a_end:
 
 ;##################################
 ; Save a set of characters 
@@ -1184,15 +2269,166 @@ p3len:	dw 0,0
 psig: 	dw 0
 ptbllen:	equ $-ptbl
 
-.bpar: db 0	
 
-strng: 
-	db 'Retro !',0
+
+config: 	; buffer for config block
+; 4x16 bytes for handoff
+; These will be loaded into the CPU registers before jumping to C000
+; By default, each config block will belong to one partition
+; The values in here will be the defaults
+; these get overwritten if there is a valid config on the disk
+conf0:	;ds 16
+c0BC:	dw 00EEh	; B=baudrates, C is overwritten with boot partition number
+c0DE:	dw 0	; DE:HL = boot partition offset
+c0HL:	dw 0	; DE:HL = boot partition offset
+c0BCs:	dw 0	; shadow registers reserved 
+c0DEs:	dw 0	; shadow registers reserved
+c0HLs:	dw 0	; shadow registers reserved
+c0IX:	dw 08000h	; IX = COVEC for CP/M 3
+c0IY:	dw 08000h	; IY = CIVEC for CP/M 3
+conf1:	;ds 16
+c1BC:	dw 01EEh	; B=baudrates, C is overwritten with boot partition number
+c1DE:	dw 0	; DE:HL = boot partition offset
+c1HL:	dw 0	; DE:HL = boot partition offset
+c1BCs:	dw 0	; shadow registers reserved 
+c1DEs:	dw 0	; shadow registers reserved
+c1HLs:	dw 0	; shadow registers reserved
+c1IX:	dw 08000h	; IX = COVEC for CP/M 3
+c1IY:	dw 08000h	; IY = CIVEC for CP/M 3
+conf2:	;ds 16
+c2BC:	dw 02EEh	; B=baudrates, C is overwritten with boot partition number
+c2DE:	dw 0	; DE:HL = boot partition offset
+c2HL:	dw 0	; DE:HL = boot partition offset
+c2BCs:	dw 0	; shadow registers reserved 
+c2DEs:	dw 0	; shadow registers reserved
+c2HLs:	dw 0	; shadow registers reserved
+c2IX:	dw 08000h	; IX = COVEC for CP/M 3
+c2IY:	dw 08000h	; IY = CIVEC for CP/M 3
+conf3:	;ds 16
+c3BC:	dw 03EEh	; B=baudrates, C is overwritten with boot partition number
+c3DE:	dw 0	; DE:HL = boot partition offset
+c3HL:	dw 0	; DE:HL = boot partition offset
+c3BCs:	dw 0	; shadow registers reserved 
+c3DEs:	dw 0	; shadow registers reserved
+c3HLs:	dw 0	; shadow registers reserved
+c3IX:	dw 08000h	; IX = COVEC for CP/M 3
+c3IY:	dw 08000h	; IY = CIVEC for CP/M 3
+; 8 Characters Title per config
+title0:	db 'PART. #1'
+title1:	db 'PART. #2'
+title2:	db 'PART. #3'
+title3:	db 'PART. #4'
+; rest is for the setup
+bconf:	ds 29
+; boot override byte
+; if bovrrd & 0x80 !=0, then boot partition number (bovrrd & 0x03)
+; bits 2..6 of bovrrd reserved for future use (other block devices)
+bovrrd:	db 0
+csign:	db 0AAh	; Signature, must be 0xAA 
+confcs:		; checksum
+	db 0
+
+hellostr:
+		db cr,lf,lf,'   #============================#',cr,lf
+		db 			'   [ SG-ROM for 2063-Z80-Retro! ]',cr,lf
+		db          '   [   v1.01     8-Okt-2023     ]',cr,lf
+		db          '   #============================#',cr,lf,lf,0
+
+strng: 		db 'Retro !',0
+str_active: db ' **ACT**'
+str_list1: 	db '  [1] - '
+str_list2: 	db '  [2] - '
+str_list3: 	db '  [3] - '
+str_list4: 	db '  [4] - '
+
+baudstrv:	dw baudstr0,baudstr1,baudstr2,baudstr3,baudstr4,baudstr5,baudstr6,baudstr7
+			dw baudstr8,baudstr9,baudstrA,baudstrB,baudstrC,baudstrD,baudstrE,baudstrF
+baudstr0:	db ' (NONE)',0			;0
+baudstr1:	db ' (50)',0			;1
+baudstr2:	db ' (75)',0			;2
+baudstr3:	db ' (110)',0			;3
+baudstr4:	db ' (134.5/115.2k)',0	;4
+baudstr5:	db ' (150/57.6k)',0		;5
+baudstr6:	db ' (300/38.4k)',0		;6	
+baudstr7:	db ' (600)',0			;7
+baudstr8:	db ' (1200)',0			;8
+baudstr9:	db ' (1800)',0			;9
+baudstrA:	db ' (2400)',0			;A
+baudstrB:	db ' (3600)',0			;B
+baudstrC:	db ' (4800)',0			;C
+baudstrD:	db ' (7200)',0			;D
+baudstrE:	db ' (9600)',0			;E
+baudstrF:	db ' (19.2k)',0			;F
+
+edmenu:
+	db cr,lf,'    Your Options:',cr,lf
+	db ' [1] - Enter New Title',cr,lf
+	db ' [2] - Change Partition',cr,lf
+	db ' [3] - Change Baudrates',cr,lf
+	db ' [4] - Change LBA',cr,lf
+	db ' [5] - Change IX (COVEC)',cr,lf
+	db ' [6] - Change IY (CIVEC)',cr,lf
+	db ' [0] - Exit',cr,lf
+	db 'Your Choice: ',0
+
+mtitle: 
+	db '',cr,lf
+	db 'ROM Setup for Z80 Retro!',cr,lf,lf
+	db 'Available Configurations:',cr,lf
+	db 0
+
+mopts:
+	db '',cr,lf
+	db 'Your Options: ',cr,lf,lf
+	db ' [1..4]: Edit Config Block',cr,lf
+	db '    [8]: Set Override',cr,lf
+	db '    [9]: Save to disk',cr,lf
+	db '    [?]: Help',cr,lf
+	db '    [0]: Exit & Restart',cr,lf
+	db 0
+
+helpstr:                                        ;<- semicolon is 40 chars from :
+	db cr,lf,'   General Help',cr,lf,lf						; 2
+	db 'This ROM Setup lets you configure the',cr,lf			;3
+	db 'contents of all the Z80s registers when',cr,lf			;4
+	db 'jumping to the OS after loading it from',cr,lf
+	db 'the SD card.',cr,lf									;6
+	db 'These values tell the loaded OS how to',cr,lf			;7
+	db 'initialize the system, and from where',cr,lf			;8
+	db 'it was loaded.',cr,lf,lf					;10
+	db 'In default mode, the first partition' ,cr,lf			;11
+	db 'set active in the MBR is booted, and',cr,lf			;12
+	db 'the corresponding config is loaded into',cr,lf				;13
+	db 'the registers before booting.',cr,lf,lf					;15
+	db 'In Override Mode, the MBR is ignored',cr,lf	;16
+	db 'and all parameters are controlled by ',cr,lf			;17
+	db 'the ROM setup',cr,lf,lf	;19
+	db 'Press [Any Key] for next page'
+	db 0
+
+helpstr1:                                        ;<- semicolon is 40 chars from :
+	db cr,lf,lf,'   Getting started',cr,lf,lf						; 2
+	db 'When you first install this ROM on your ',cr,lf			;3
+	db 'Z80-Retro!, or use a new SD card, the',cr,lf			;4
+	db 'ROM will find no configuration, and will',cr,lf
+	db 'automatically enter the Setup menu.',cr,lf									;6
+	db '',cr,lf			;7
+	db 'If you already have a bootable partition',cr,lf			;8
+	db 'on your SD card, you can just save the ',cr,lf					;9
+	db 'defaults by pressing [9] and reboot by ' ,cr,lf			;10
+	db 'pressing [0].',cr,lf									;11
+	db '',cr,lf				;13
+	db 'You *must* configure any config blocks',cr,lf					;15
+	db 'you wish to use from the [B]oot Menu ',cr,lf	;16
+	db 'during startup. Using this menu enables',cr,lf			;17
+	db 'Override Mode for the current boot ',cr,lf,lf	;19
+	db 'Press [Any Key] to return to Setup',cr,lf
+	db 0
 
 CSEG 
 
-include Lsdcard.asm
-include Lspi.asm
-include Lnocache.asm
+; include Lsdcard.asm
+; include Lspi.asm
+; include Lnocache.asm
 
 end

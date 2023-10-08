@@ -1,15 +1,14 @@
 r Firmware\rom.z80
-r Firmware\Lspi.z80
-r Firmware\Lnocache.z80
-r Firmware\Lsdcard.z80
+r Firmware\Lsdc.z80
 r Other\fnt8x8.z80
 r Other\z80bmp.z80
 
 zmac rom
 zmac fnt8x8
-zmac z80bmp.z80
+zmac z80bmp
+zmac Lsdc
 
-link loadr[L0]=rom,fnt8x8,z80bmp
+link loadr[L0]=rom,fnt8x8,z80bmp,Lsdc
 era 2063.rom
 ren 2063.rom loadr.com
 w build\2063.rom b
