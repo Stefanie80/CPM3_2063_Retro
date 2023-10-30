@@ -1,0 +1,1138 @@
+; CP/M 3 SD card driver for MBR partitions
+	CSEG ; Goes into Common Memory
+; Config Equates
+true		equ -1
+false		equ not true
+banked		equ true
+.sd_debug 	equ false
+.mbr_msg	equ false
+caldebug	equ false
+
+; Non-printable chars
+cr			equ 13
+lf			equ 10
+.sector_buffer equ 08000h
+
+; Equates for ports & bits
+gpio_in		equ 000h	; GP input port
+gpio_out	equ	010h	; GP output port
+
+; Public declarations	
+	public 	SDP0, SDP1, SDP2, SDP3 	; Partition 0..3 in the MBR
+	public loadmbr, savembr			; Read/Write block 0
+	
+; Extern Variables
+	extrn ?bank,gpiocache,?co
+	extrn @dtbl,@dma,@trk,@sect,@adrv,@rdrv,@cbnk,@dbnk
+; debug stuff
+	extrn hexdump_a,puts_crlf,iputs,disk_dump,dump_regs,hexdmp,dumpdpb
+		
+.sd_scratch:	ds 6		; command buffer 
+oldstack: 		ds 256
+sdstack:		dw 0
+
+if banked
+	DSEG
+endif
+
+    dw  .sdcard_write
+    dw  .sdcard_read
+    dw  .sdcard_login
+    dw  .sdcard_init
+    db  0           ; Unit. This will be passed back to us as @rdrv
+    db  0           ; Type. can be used for arbitrary information
+SDP0:
+    dw  0           ; XLT sector translation table (no xlation done)
+    dw  0, 0, 0, 0  ; scratchpad
+    db  0           ; scratch
+    db  0           ; media flag
+    dw  .dpb0     	; DPB pointer
+    dw  0			; CSV not required for fixed drive
+    dw  0FFFEh      ; ALV pointer will be created by GENCPM
+    dw  0FFFEh      ; DIRBCB pointer will be created by GENCPM
+    dw  0FFFEh      ; DTABCB pointer will be created by GENCPM
+    dw  0FFFEh      ; HASH determined by GENCPM
+    dw  0FFFEh      ; HBANK determined by GENCPM
+
+    dw  .sdcard_write
+    dw  .sdcard_read
+    dw  .sdcard_login
+    dw  .sdcard_init
+    db  1           ; Unit. This will be passed back to us as @rdrv
+    db  0           ; Type. can be used for arbitrary information
+SDP1:
+    dw  0           ; XLT sector translation table (no xlation done)
+    dw  0, 0, 0, 0  ; scratchpad
+    db  0           ; scratch
+    db  0           ; media flag
+    dw  .dpb1     	; DPB pointer
+    dw  0			; CSV not required for fixed drive
+    dw  0FFFEh      ; ALV pointer will be created by GENCPM
+    dw  0FFFEh      ; DIRBCB pointer will be created by GENCPM
+    dw  0FFFEh      ; DTABCB pointer will be created by GENCPM
+    dw  0FFFEh      ; HASH determined by GENCPM
+    dw  0FFFEh      ; HBANK determined by GENCPM
+
+    dw  .sdcard_write
+    dw  .sdcard_read
+    dw  .sdcard_login
+    dw  .sdcard_init
+    db  2           ; Unit. This will be passed back to us as @rdrv
+    db  0           ; Type. can be used for arbitrary information
+SDP2:
+    dw  0           ; XLT sector translation table (no xlation done)
+    dw  0, 0, 0, 0  ; scratchpad
+    db  0           ; scratch
+    db  0           ; media flag
+    dw  .dpb2     	; DPB pointer
+    dw  0			; CSV not required for fixed drive
+    dw  0FFFEh      ; ALV pointer will be created by GENCPM
+    dw  0FFFEh      ; DIRBCB pointer will be created by GENCPM
+    dw  0FFFEh      ; DTABCB pointer will be created by GENCPM
+    dw  0FFFEh      ; HASH determined by GENCPM
+    dw  0FFFEh      ; HBANK determined by GENCPM
+
+    dw  .sdcard_write
+    dw  .sdcard_read
+    dw  .sdcard_login
+    dw  .sdcard_init
+    db  3           ; Unit. This will be passed back to us as @rdrv
+    db  0           ; Type. can be used for arbitrary information
+SDP3:
+    dw  0           ; XLT sector translation table (no xlation done)
+    dw  0, 0, 0, 0  ; scratchpad
+    db  0           ; scratch
+    db  0           ; media flag
+    dw  .dpb3     	; DPB pointer
+    dw  0			; CSV not required for fixed drive
+    dw  0FFFEh      ; ALV pointer will be created by GENCPM
+    dw  0FFFEh      ; DIRBCB pointer will be created by GENCPM
+    dw  0FFFEh      ; DTABCB pointer will be created by GENCPM
+    dw  0FFFEh      ; HASH determined by GENCPM
+    dw  0FFFEh      ; HBANK determined by GENCPM
+
+if banked
+	CSEG
+endif
+
+; DPB Block for SDP0
+; Each XDPH needs its own separate DPB
+; So we can construct that during the init/login routine
+; NOTE:
+; we set DSM to the max possible value here, 
+; as a worst case scenario for GENCPM to use.
+; The actual value will be determined by init 
+
+.dpb0:		
+    dw  64      ; fixed	SPT (8k per Track)
+    db  6       ; fixed	BSH
+    db  63      ; fixed	BLM
+    db  3       ; fixed	EXM
+    dw  7FFFh   ; 		DSM (max allocation block number)
+    dw  4000    ; fixed	DRM (max directory entries)
+    db  0FFh    ; fixed AL0 (blocks for directory)
+    db  0FFh    ; fixed	AL1 (16*8k/32=4096)
+    dw  8000h   ; fixed	CKS (non removable drive)
+    dw  2      	; fixed	OFF (16k reserved for CPMLDR)
+    db  2       ; fixed	PSH
+    db  3       ; fixed	PHM
+	
+.dpb1:		
+    dw  64      ; fixed	SPT (8k per Track)
+    db  6       ; fixed	BSH
+    db  63      ; fixed	BLM
+    db  3       ; fixed	EXM
+    dw  7FFFh   ; 		DSM (max allocation block number)
+    dw  4000    ; fixed	DRM (max directory entries)
+    db  0FFh    ; fixed AL0 (blocks for directory)
+    db  0FFh    ; fixed	AL1 (16*8k/32=4096)
+    dw  8000h   ; fixed	CKS (non removable drive)
+    dw  2      	; fixed	OFF (16k reserved for CPMLDR)
+    db  2       ; fixed	PSH
+    db  3       ; fixed	PHM
+
+.dpb2:		
+    dw  64      ; fixed	SPT (8k per Track)
+    db  6       ; fixed	BSH
+    db  63      ; fixed	BLM
+    db  3       ; fixed	EXM
+    dw  7FFFh   ; 		DSM (max allocation block number)
+    dw  4000    ; fixed	DRM (max directory entries)
+    db  0FFh    ; fixed AL0 (blocks for directory)
+    db  0FFh    ; fixed	AL1 (16*8k/32=4096)
+    dw  8000h   ; fixed	CKS (non removable drive)
+    dw  2      	; fixed	OFF (16k reserved for CPMLDR)
+    db  2       ; fixed	PSH
+    db  3       ; fixed	PHM
+
+.dpb3:		
+    dw  64      ; fixed	SPT (8k per Track)
+    db  6       ; fixed	BSH
+    db  63      ; fixed	BLM
+    db  3       ; fixed	EXM
+    dw  7FFFh   ; 		DSM (max allocation block number)
+    dw  4000    ; fixed	DRM (max directory entries)
+    db  0FFh    ; fixed AL0 (blocks for directory)
+    db  0FFh    ; fixed	AL1 (16*8k/32=4096)
+    dw  8000h   ; fixed	CKS (non removable drive)
+    dw  2      	; fixed	OFF (16k reserved for CPMLDR)
+    db  2       ; fixed	PSH
+    db  3       ; fixed	PHM		
+	
+.initialized:	db 0
+.drv_offset:
+    dw  0, 0	; SD Partition 0
+    dw  0, 0	; SD Partition 1
+    dw  0, 0	; SD Partition 2
+    dw  0, 0	; SD Partition 3
+
+.sdcard_write:
+	ld (oldstack),sp
+	ld sp,sdstack
+if .sd_debug > 0
+	call iputs
+	db 'SD.WRITE',cr,lf,0
+endif
+	call .calc_sd_block
+	ld a,24|040h		; the command byte
+	ld (.sd_scratch),a
+	ld a,000h|001h	; the CRC byte
+	ld (.sd_scratch+5),a
+	
+if banked
+	ld a,(@dbnk)
+	call ?bank
+endif
+	di
+    call sd_cmd24        ; write the SD block
+	ei
+if banked
+	push af
+	ld a,(@cbnk)
+	call ?bank
+	pop af
+endif
+	or a
+	jr z,writedone
+	ld a,1		; pass error to BDOS
+	
+writedone:	
+if .sd_debug > 0
+	push af
+	call iputs
+	db '/SD.WRITE:',0
+	pop af
+	push af
+	call hexdump_a
+	call puts_crlf
+	call puts_crlf
+	pop af
+endif
+	ld sp,(oldstack)
+ret
+
+.sdcard_read:
+	ld (oldstack),sp
+	ld sp,sdstack
+if .sd_debug > 0
+	call iputs
+	db 'SD.READ',cr,lf,0
+endif
+	call .calc_sd_block
+	ld	a,17|040h		; the command byte
+	ld (.sd_scratch),a
+	ld a,000h|001h	; the CRC byte
+	ld (.sd_scratch+5),a
+	
+if banked
+	ld a,(@dbnk)
+	call ?bank
+endif
+	di
+    call sd_cmd17        ; read the SD block
+	ei
+if banked
+	push af
+	ld a,(@cbnk)
+	call ?bank
+	pop af
+endif
+if .sd_debug > 0
+	push af
+	call iputs
+	db '/SD.READ:',0
+	pop af
+	push af
+	call hexdump_a
+	call puts_crlf
+	call puts_crlf
+	pop af
+endif
+
+	ld sp,(oldstack)
+ret
+
+.sdcard_login:
+if .sd_debug > 0
+	call iputs
+	db 'SD.LOGIN',cr,lf,0
+endif	
+ret
+
+if banked
+	DSEG
+endif
+.sdcard_init:
+	ld a,(.initialized)
+	cp 0FFh
+	ret z	; already initialized
+	ld (oldstack),sp
+	ld sp,sdstack
+
+if .sd_debug > 0
+	call iputs
+	db 'SD.INIT',cr,lf,0
+endif	
+	; This needs to read the MBR
+	call loadmbr
+	or a
+	jr z,init0
+	halt	; if this fails, just halt
+	; if you know a way to return the error to BDOS,
+	; please tell me
+init0:
+if .sd_debug > 0
+	call iputs
+	db 'SD.0',cr,lf,0
+endif	
+
+	; and populate the offsets for the individual partitions
+	ld ix,081BEh	; the start of the partition table
+	; Partition 0
+	ld iy,.drv_offset
+	call loadoffs		; load offset first
+	;ld a,(ix+4) 		; load partition type
+	;ld (SDP0-1),a
+	
+	; calculate partition size
+	ld iy,.sd_scratch	; scratchpad
+	call calcsize
+	or a
+	jr z,pval0		; partition is valid size
+	xor a
+	ld (.dpb0+5),a
+	ld (.dpb0+6),a
+	jr init1		; try next
+pval0:
+	ld a,(iy+1)
+	ld (.dpb0+6),a
+	ld a,(iy)
+	ld (.dpb0+5),a
+	
+init1:
+if .sd_debug > 0
+	call iputs
+	db 'SD.1',cr,lf,0
+endif	
+
+	ld bc,16
+	add ix,bc
+	ld iy,.drv_offset+4
+	call loadoffs		; load offset first
+	;ld a,(ix+4) 		; load partition type
+	;ld (SDP1-1),a
+	
+	; calculate partition size
+	ld iy,.sd_scratch	; scratchpad
+	call calcsize
+	or a
+	jr z,pval1		; partition is valid size
+	xor a
+	ld (.dpb1+5),a
+	ld (.dpb1+6),a
+	jr init2		; try next
+pval1:
+	ld a,(iy+1)
+	ld (.dpb1+6),a
+	ld a,(iy)
+	ld (.dpb1+5),a
+	
+init2:
+if .sd_debug > 0
+	call iputs
+	db 'SD.2',cr,lf,0
+endif	
+
+	ld bc,16
+	add ix,bc
+	ld iy,.drv_offset+8
+	call loadoffs		; load offset first
+	;ld a,(ix+4) 		; load partition type
+	;ld (SDP2-1),a
+	
+	; calculate partition size
+	ld iy,.sd_scratch	; scratchpad
+	call calcsize
+	or a
+	jr z,pval2		; partition is valid size
+	xor a
+	ld (.dpb2+5),a
+	ld (.dpb2+6),a
+	jr init3		; try next
+pval2:
+	ld a,(iy+1)
+	ld (.dpb2+6),a
+	ld a,(iy)
+	ld (.dpb2+5),a
+
+init3:
+if .sd_debug > 0
+	call iputs
+	db 'SD.3',cr,lf,0
+endif	
+
+	ld bc,16
+	add ix,bc
+	ld iy,.drv_offset+12
+	call loadoffs		; load offset first
+	;ld a,(ix+4) 		; load partition type
+	;ld (SDP3-1),a
+	; calculate partition size
+	
+	ld iy,.sd_scratch	; scratchpad
+	call calcsize
+	or a
+	jr z,pval3		; partition is valid size
+	xor a
+	ld (.dpb3+5),a
+	ld (.dpb3+6),a
+	jr initdone		; quit
+pval3:
+	ld a,(iy+1)
+	ld (.dpb3+6),a
+	ld a,(iy)
+	ld (.dpb3+5),a	
+initdone:
+	push af
+	ld a,0FFh
+	ld (.initialized),a
+if .mbr_msg > 0
+	ld ix,.dpb1
+	call dumpdpb
+endif
+
+if .sd_debug > 0
+	call iputs
+	db '/SD.INIT',cr,lf,0
+endif	
+	pop af
+	ld sp,(oldstack)
+ret
+
+loadoffs:
+	ld a,(ix+11)	
+	ld (iy),a
+	ld a,(ix+10)
+	ld (iy+1),a
+	ld a,(ix+9)
+	ld (iy+2),a
+	ld a,(ix+8)
+	ld (iy+3),a
+ret
+
+calcsize:
+if caldebug
+	ld bc,12
+	push ix
+	pop hl
+	add hl,bc
+	ld bc,4
+	ld e,0
+	call hexdmp
+endif
+	; Byte 0
+	ld a,(ix+12)
+	rrca
+	rrca
+	rrca
+	rrca			; 	shift right * 4 = div/16
+	and 0Fh 	; mask away the 4 garbage bits
+	ld (iy),a
+	
+	; Byte 1
+	ld a,(ix+13)
+	rrca
+	rrca
+	rrca
+	rrca			; 	shift right * 4 = div/16
+	ld b,a
+	and 0Fh 	; mask away the 4 high order bits
+	ld (iy+1),a
+	ld a,b		; this time, we need to copy the bits to the lower byte
+	and 0F0h	; take only the high order 4 bits
+	or (iy)
+	ld (iy),a
+	
+	; Byte 2
+	ld a,(ix+14)
+	rrca
+	rrca
+	rrca
+	rrca			; 	shift right * 4 = div/16
+	ld b,a
+	and 0Fh 	; mask away the 4 high order bits
+	ld (iy+2),a
+	ld a,b		; this time, we need to copy the bits to the lower byte
+	and 0F0h	; take only the high order 4 bits
+	or (iy+1)
+	ld (iy+1),a
+	
+	; Byte 3
+	ld a,(ix+15)
+	rrca
+	rrca
+	rrca
+	rrca			; 	shift right * 4 = div/16
+	ld b,a
+	and 0Fh 	; mask away the 4 high order bits
+	ld (iy+3),a
+	ld a,b		; this time, we need to copy the bits to the lower byte
+	and 0F0h	; take only the high order 4 bits
+	or (iy+2)
+	ld (iy+2),a
+	
+	; the 32 bit value pointed to by IY now holds the number of 8k blocks on this partition
+	; lets evaluate it
+	ld a,(iy+3)		; the MSB
+	or a			; must be zero
+	jr nz,.toobig
+
+	ld a,(iy+2)		; the next lower byte
+	or a			; must also be zero
+	jr nz,.toobig
+	
+	ld a,(iy+1)		; the next byte
+	bit 7,a			; must be <80h
+	jr nz,.toobig
+	
+	or a
+	jr nz,.report	; if this is not zero, we are >0 and <8000h
+					; and don't care about the lowest byte
+	; if the former byte was zero
+	ld a,(iy)		; the lowest byte
+	or a			; must *not* be zero
+	jr z,.zerosize
+	
+.report:
+	xor a
+	jr calcdone
+.zerosize:
+	ld a,0F0h
+	jr calcdone
+.toobig:
+	ld a,0FFh
+calcdone:
+if caldebug
+	call hexdump_a
+	push af
+	ld bc,4
+	push iy
+	pop hl
+	ld e,0
+	call hexdmp
+	pop af
+endif
+
+ret
+
+if banked
+	CSEG
+endif
+
+sd_cmd17:
+if .sd_debug > 0
+	call iputs
+	db 'SD.CMD17',cr,lf,0
+endif
+
+	call sdlower_cs			; enable card
+	call sdcommand			; send command
+	or a
+	jr nz,cmd17done			; if response !=0, error
+	; wait for the token from the card
+	ld bc,01000h			; timeout value
+	cmd17wait:
+		call sdreceive_byte
+		ld a,l
+		cp 0FFh
+		jr nz,cmd17token	; we got something
+		dec bc
+		ld a,b
+		or c
+		jr nz,cmd17wait
+		; if we get here, timeout
+		ld a,0ffh
+		jr cmd17done
+	cmd17token:
+	cp 0FEh					; ready token?
+	jr nz,cmd17done			; if not, abort
+	ld hl,(@dma)
+	call sdreceive_sector	; read block
+	; call sd_rx				; read CRC bytes. 
+	; ld a,l
+	; call hexdump_a
+	; call sd_rx				; TODO: actually evaluate the CRC
+	; ld a,l
+	; call hexdump_a
+	xor a					; zero A to indicate success
+cmd17done:
+	push af
+	call sdraise_cs			; disable card
+	pop af
+ret
+
+sd_cmd24:
+if .sd_debug > 0
+	call iputs
+	db 'SD.CMD24',cr,lf,0
+endif
+	call sdlower_cs 		; enable card
+	call sdcommand			; send command
+	call sdreceive_byte		; give the card 8 extra clocks
+	ld l,0FEh
+	call sdtransmit_byte	; send token
+	ld hl,(@dma)
+	call sdtransmit_sector	; write block
+	ld bc,0f000h
+cmd24wait:		; wait for a response
+		push bc
+		call sdreceive_byte
+		pop bc
+		ld a,l
+		cp 0FFh
+		jr nz,cmd24response
+		dec bc
+		ld a,b
+		or c
+		jr nz,cmd24wait
+		; If we get here, timeout
+		call iputs
+		db 'SD.CMD24:timeout',cr,lf,0
+		ld a,0ffh
+		jr cmd24return
+cmd24response:
+	; Make sure the response is 0bxxx00101 else is an error		
+	and 01fh
+	cp 005h
+	ld a,0f0h
+	jr nz,cmd24return
+	xor a					; zero A to indicate success
+cmd24done:	
+	push af
+	call sdraise_cs			; disable card
+	call sdlower_cs
+cmd24busy:
+	call sdreceive_byte
+	ld a,l
+	cp 0FFh
+	jr nz,cmd24busy
+	call sdraise_cs
+if .sd_debug > 0
+	push af
+	call iputs
+	db '/SD.CMD24',cr,lf,0
+	pop af
+endif
+cmd24return:
+	pop af
+ret
+
+savembr:
+	ld (oldstack),sp
+	ld sp,sdstack
+
+	ld	a,24|040h		; the command byte
+	ld (.sd_scratch),a
+	xor a
+	ld (.sd_scratch+1),a
+	ld (.sd_scratch+2),a
+	ld (.sd_scratch+3),a
+	ld (.sd_scratch+4),a
+	ld a,000h|001h	; the CRC byte
+	ld (.sd_scratch+5),a
+
+	ld hl,(@dma)
+	push hl			; we have to save @dma
+	ld hl,08000h
+	ld (@dma),hl	; set @dma to 08000h
+	call sd_cmd24
+	pop hl
+	ld (@dma),hl	; restore @dma
+	ld sp,(oldstack)
+ret
+
+loadmbr:
+if .sd_debug > 0
+	call iputs
+	db 'MBR.LOAD',cr,lf,0
+endif	
+
+	ld	a,17|040h		; the command byte
+	ld (.sd_scratch),a
+	xor a
+	ld (.sd_scratch+1),a
+	ld (.sd_scratch+2),a
+	ld (.sd_scratch+3),a
+	ld (.sd_scratch+4),a
+	ld a,000h|001h	; the CRC byte
+	ld (.sd_scratch+5),a
+
+	ld hl,(@dma)
+	push hl			; we have to save @dma
+	ld hl,08000h
+	ld (@dma),hl	; set @dma to 08000h
+	call sd_cmd17
+	pop hl
+	ld (@dma),hl	; restore @dma
+	ld a,(.sector_buffer + 01BEh + 40h)
+	
+if .sd_debug > 1
+	call hexdump_a
+endif
+
+	cp 055h
+	jr nz,.err0
+	ld a,(.sector_buffer + 01BEh + 41h)
+	
+if .sd_debug > 1
+	call hexdump_a
+	push af
+	call puts_crlf
+	pop af
+endif	
+
+	cp 0AAh
+	jr nz,.err0	
+	xor a
+	jr lmbrret
+
+.err0:
+	ld a,0FFh
+lmbrret:
+if .sd_debug > 0
+	push af
+	call iputs
+	db '/MBR.LOAD',cr,lf,0
+	pop af
+endif	
+
+ret
+
+sdcommand:
+if .sd_debug >0
+	call iputs
+	db 'CMD:',0
+	ld bc,6
+	ld hl,.sd_scratch
+	ld e,0
+	call hexdmp ;dump BC bytes from HL. If E!=0 be fancy
+endif
+	ld b,6				; bytes to send
+	ld ix,.sd_scratch	; command buffer
+	cmdbyte:
+		ld l,(ix)
+		call sdtransmit_byte
+		inc ix
+		djnz cmdbyte
+	; command sent, wait for response	
+	ld	b,0FFh		; B = number of retries
+	sd_r1_loop:
+		push bc
+		call sdreceive_byte	; read a byte into A (and a copy in E as well)
+		pop bc
+		ld a,l
+		and	080h		; Is the MSB set to 1?
+		jr z,sd_r1_done	; If MSB=0 then we are done
+		djnz sd_r1_loop	; else try again until the retry count runs out
+	sd_r1_done:
+if .sd_debug
+	push af
+	call puts_crlf
+	pop af
+endif	
+ret
+
+sdlower_cs:
+	ld	a,(gpiocache)
+	and	0FDh
+	or	001h
+	out	(gpio_out),a
+	and	0FBh
+	ld	(gpiocache),a
+	out	(gpio_out),a
+ret
+
+	
+sdraise_cs:
+	ld	a,(gpiocache)
+	and	0FDh
+	out	(gpio_out),a
+	or	005h
+	ld	(gpiocache),a
+	out	(gpio_out),a
+	; Fall through
+sdreceive_byte:	; return byte in L
+	ld	a,(gpiocache)
+	or	001h		; data high
+	and	0FDh		; clock
+	ld	d,a
+	add	2
+	ld	e,a		; D is clock low E is high
+	ld	c,010h
+	call	sd_rx
+ret
+
+	; Entry point with registers set up
+sd_rx:
+	;	Clock the bits	(47 clocks a bit) or about 25K/second minus
+	; 	overheads per byte - so nearer 20K which is adequate for our
+	; 	needs
+	;	Bit 0
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 1
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 2
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 3
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 4
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 5
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 6
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	;	Bit 7
+	out	(c),d
+	out	(c),e
+	in	a,(gpio_in)
+	rla	
+	rl	l
+	ret
+
+;
+;	Slightly less performance critical which
+;	is good as it's annoying on this setup
+;	due to the shared gpio
+;
+;	Byte to send is in L
+;
+sdtransmit_byte:
+	ld	a,(gpiocache)
+	and	0FDh		; clock high
+	;	Clock the bits out. Ignore reply
+	;	48 clocks a bit
+	;	
+	ld	h,2	; saves us 6 clocks a bit
+	;
+	;	Bit 0
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 1
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 2
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 3
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 4
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 5
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 6
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+	sub	h
+	;	Bit 7
+	rra
+	rl	l
+	rla
+	out	(gpio_out),a
+	add	h
+	out	(gpio_out),a
+
+	xor	a
+	ret
+
+; (HL) -> Sector buffer
+sdreceive_sector:
+	push	ix
+	push	hl
+	pop	ix
+	
+rx_byte:
+	call	sdreceive_byte
+	ld	(ix),l
+	inc	ix
+	call	sd_rx
+	ld	(ix),l
+	inc	ix
+	ld	b,0FFh		; 510 bytes
+rx_loop:
+	call	sd_rx
+	ld	(ix),l	
+	inc	ix
+	call	sd_rx
+	ld	(ix),l
+	inc	ix
+	djnz	rx_loop
+	pop	ix
+	xor	a
+ret
+
+sdtransmit_sector:
+	push	ix
+	push	hl
+	pop	ix
+	ld	b,0
+tx_byte:
+	ld	l,(ix)
+	inc	ix
+	call	sdtransmit_byte
+	ld	l,(ix)
+	inc	ix
+	call	sdtransmit_byte
+	djnz	tx_byte
+	pop	ix
+ret
+	
+mul16:
+   ;Inputs:
+   ;     DE and BC are factors
+   ;Outputs:
+   ;     A is 0
+   ;     BC is not changed
+   ;     DE:HL is the product
+   ;902cc~1206cc, avg=1050cc
+   ;20 bytes
+	ld hl,0
+	ld a,16
+	Mul_Loop_1:
+		add hl,hl
+		rl e 
+		rl d
+		jr nc,$+6
+		add hl,bc
+		jr nc,$+3
+		inc de
+		dec a
+	jr nz,Mul_Loop_1
+ret
+
+;##########################################################################
+; Calculate the address of the SD block, given the CP/M track number
+; in @trk, sector in @sect, and offset in the table at .drv_offset
+; Return: the 32-bit block number in DE,HL
+; Also deposit the address into the SD command buffer
+; Based on proposal from Trevor Jacobs - 02-15-2023
+;##########################################################################
+	
+.calc_sd_block:	
+if .sd_debug >= 1
+	call iputs
+	db 'CALC: ',0
+	call disk_dump
+endif
+	
+	ld ix,.drv_offset
+	ld iy,.sd_scratch+1
+	ld a,(@rdrv)
+	add a,a
+	add a,a
+	ld b,0
+	ld c,a
+	add ix,bc			; IX -> Pstart
+
+	;ld	hl,0
+	ld	bc,(@trk)		; BC = 16 (sectors/track)
+	ld 	de,16			; DE = requested track	
+						; note: flipped might be faster
+if .sd_debug >= 2
+	call dump_regs
+endif
+						
+	call mul16			; DE:HL = BC * DE
+
+if .sd_debug >= 2
+	call dump_regs
+endif
+
+	ld bc,(@sect)		; BC = the requested sector
+	add hl,bc			; DE:HL now the block offset
+
+if .sd_debug >= 2
+	call dump_regs
+endif
+
+	call .add32			; (IY) = DE:HL + (IX)
+
+if .sd_debug >= 2
+	call dump_regs
+	push iy
+	pop hl
+	ld bc,4
+	ld e,0
+	call hexdmp
+	push ix
+	pop hl
+	ld bc,4
+	ld e,0
+	call hexdmp
+	call puts_crlf
+endif
+
+    ld  d,(iy)            ; DE = low-word of the SD starting block
+    ld  e,(iy+1)        ; DE = low-word of the SD starting block
+    ld  h,(iy+2)      ; HL = high word of SD start block
+    ld  l,(iy+3)        ; HL = high word of SD start block	
+
+if .sd_debug >= 1
+	push hl
+	push de
+	call dump_regs
+	call iputs
+	db '/CALC',cr,lf,0
+	pop de
+	pop hl
+endif
+    ret
+
+; (IY) = DE:HL + (IX)
+.add32:
+if .sd_debug >= 2
+	push de
+	push hl
+	push iy
+	call iputs
+	db 'ADD32: ',0
+	call dump_regs
+	call iputs
+	db ' (IX): ',0
+	push ix
+	pop hl
+	ld bc,4
+	ld e,0
+	call hexdmp
+	pop iy
+	pop hl
+	pop de
+endif
+
+	push de		; save the MSW
+	
+	ld d,(ix+2)	; LSW first
+	ld e,(ix+3)
+	add hl,de
+	ld (iy+3),l
+	ld (iy+2),h
+
+if .sd_debug >= 2
+	push af
+	push hl
+	call dump_regs
+	call iputs
+	db ' (IY): ',0
+	push iy
+	pop hl
+	ld bc,4
+	ld e,0
+	call hexdmp
+	pop hl
+	pop af
+endif	
+	
+	pop hl
+	ld d,(ix)	; MSW 
+	ld e,(ix+1)
+
+if .sd_debug >= 2
+	push af	; need to save that carry flag
+	call dump_regs
+	pop af
+endif
+
+	adc hl,de
+	jr nc,.add32done
+	inc hl
+.add32done:
+	ld (iy+1),l
+	ld (iy),h
+
+	ret
+
+		end
