@@ -1,0 +1,257 @@
+; SIO Driver
+
+; TODO: Make these dynamic
+sioa_data:	db	030h		; SIO port A, data
+siob_data:	db 	031h		; SIO port B, data
+sioa_ctrl:	db 	032h		; SIO port A, control
+siob_ctrl:	db 	033h		; SIO port B, control
+sioa_ctc:	db 	041h		; CTC port 1
+siob_ctc:	db	042h		; CTC port 2
+
+public SIOA, SIOB
+	
+		dw	sioa_init
+		dw 	sioa_istat
+		dw	sioa_ostat
+		dw	sioa_rx
+		dw	sioa_tx
+SIOA:
+		db 	'SIO-A '	; device 0, 
+		db	0Fh
+bauda:	db 	14			; 14 -> 9600bps
+
+		dw	siob_init
+		dw 	siob_istat
+		dw	siob_ostat
+		dw	siob_rx
+		dw	siob_tx
+SIOB:
+		db 	'SIO-B '	; device 1, 
+		db 	0Fh
+baudb:	db 	15			; 15 -> 19200bps
+
+sioa_rx:
+	call sioa_istat
+	jr z,sioa_rx		; wait for char 
+	ld a,(sioa_data)
+	ld c,a				; load port
+	;ld b,0
+	in a,(c)			; read char
+ret
+
+siob_rx:
+	call siob_istat
+	jr z,siob_rx		; wait for char 
+	ld a,(siob_data)
+	ld c,a				; load port
+	;ld b,0
+	in a,(c)			; read char
+ret
+
+sioa_tx:
+	ld d,c
+sioa_tx_wait:
+	call sioa_ostat
+	jr	z,sioa_tx_wait
+	ld a,(sioa_data)
+	ld c,a
+	;ld b,0		; for 16bit IO
+	
+	out	(c),d	; send the character
+ret
+
+siob_tx:
+	ld d,c
+siob_tx_wait:
+	call siob_ostat
+	jr	z,siob_tx_wait
+	ld a,(siob_data)
+	ld c,a
+	;ld b,0		; for 16bit IO
+	
+	out	(c),d	; send the character
+ret
+
+sioa_istat:
+	ld 	a,(sioa_ctrl)	; load port
+	ld c,a				; into C
+	;ld b,0				; clear B for 16bit IO
+	
+	in a,(c)			; read sio control status byte
+	and	1				; check the rcvr ready bit
+ret
+
+siob_istat:
+	ld 	a,(siob_ctrl)	; load port
+	ld c,a				; into C
+	;ld b,0				; clear B for 16bit IO
+	
+	in a,(c)			; read sio control status byte
+	and	1				; check the rcvr ready bit
+ret
+
+sioa_ostat:
+	ld 	a,(sioa_ctrl)	; load port
+	ld c,a				; into C
+	;ld b,0				; clear B for 16bit IO
+	
+	in a,(c)			; read sio control status byte
+	and	4				; check the xmtr empty bit
+ret
+
+siob_ostat:
+	ld 	a,(siob_ctrl)	; load port
+	ld c,a				; into C
+	;ld b,0				; clear B for 16bit IO
+	
+	in a,(c)			; read sio control status byte
+	and	4				; check the xmtr empty bit
+ret
+
+sioa_init:
+	ld a,(sioa_ctrl)
+	ld c,a
+	ld hl,.sio_init_wr	; point to init string
+	ld b,.sio_init_len_wr ; number of bytes to send
+	otir			; write B bytes from (HL) into port in the C reg
+    ld a,(sioa_ctc)
+	ld c,a
+	ld a,047h      ; TC follows, Counter, Control, Reset
+    out (c),a
+	ld a,(bauda)
+    call getctc
+    out (c),a
+ret
+
+siob_init:
+	ld a,(siob_ctrl)
+	ld c,a
+	ld hl,.sio_init_wr	; point to init string
+	ld b,.sio_init_len_wr ; number of bytes to send
+	otir			; write B bytes from (HL) into port in the C reg
+    ld a,(siob_ctc)
+	ld c,a
+	ld a,047h      ; TC follows, Counter, Control, Reset
+    out (c),a
+	ld a,(baudb)
+    call getctc
+    out (c),a
+ret
+
+getctc:
+	push bc
+	; get Index in A
+	ld b,0
+	ld c,a
+	ld hl,bdtbl
+	add hl,bc
+	ld a,(hl)
+	; return CTC time constant in A
+	pop bc
+ret
+
+
+;##############################################################
+; Initialization string for the Z80 SIO
+;##############################################################
+
+.sio_init_wr:
+	db	00011000b	; wr0 = reset everything
+	db	00000100b	; wr0 = select reg 4
+	db	01000100b	; wr4 = /16 N1 (115200 from 1.8432 MHZ clk)
+	db	00000011b	; wr0 = select reg 3
+	db	11000001b	; wr3 = RX enable, 8 bits/char
+	db	00000101b	; wr0 = select reg 5
+	db	01101000b	; wr5 = DTR=0, TX enable, 8 bits/char
+.sio_init_len_wr:   equ $-.sio_init_wr
+
+bdtbl:
+	db	0,0,0,0, 1,      2,     3,     192, 96,   64,   48,   32,   24,   16,   12,   6
+	;	0,0,0,0, 115200, 57600, 38400, 600, 1200, 1800, 2400, 3600, 4800, 7200, 9600, 19200
+
+end
+
+;Registers:
+
+; WR0:  x x x x x x x x 
+;		          0 0 0	Register 0
+;		          0 0 1 Register 1
+;		          0 1 0 Register 2
+;		          0 1 1 Register 3
+;		          1 0 0 Register 4
+;		          1 0 1 Register 5
+;		          1 1 0 Register 6
+;		          1 1 1 Register 7
+;		    0 0 0 Null Code
+;		    0 0 1 Send Abort (SDLC)
+;			0 1 0 Reset Ext Status / Interrupts
+;			0 1 1 Channel Reset
+;			1 0 0 Enable Int on next Rx char
+;			1 0 1 Reset TxInt pending
+;		    1 1 0 Error Reset
+;		    1 1 1 Return from Int (Cha-A only)
+;		0 0 Null Code
+;		0 1 Reset Rx CRC checker
+;		1 0 Reset Tx CRC Generator
+;		1 1 Reset Tx Underrun/EOM Latch
+;
+; WR1:	x x x x x x x x 
+;		              1 Ext Int enable
+;		            1 Tx Int enable
+;		          1 Status affects Vector (Cha-B Only)
+;		      0 0 RX Int disable
+;		      0 1 Rx In on first character
+;		      1 0 Int on all Rx chars (Parity affects vector)
+;		      1 1 Int on all Rx Chars (Parity does not affect vector)
+;		    1 Wait/Ready on R/T
+;		  1 Wait/Ready Function
+;		1 Wait/Ready Enable
+;
+; WR2: 	x x x x x x x x (Channel B only)
+;		Interrupt Vector
+;
+; WR3: 	x x x x x x x x 
+;		              1 Rx enable
+;		            1 Sync Char Load Inhibit
+;		          1 Adress Search Mode (SDLC)
+;		        1 Rx CRC Enable
+;		      1 Enter Hunt Phase
+;		    1 Auto Enables
+;		0 0 Rx 5 bit/char
+;		0 1 Rx 7 bit/char
+;		1 0 Rx 6 bit/char
+;		1 1 Rx 8 bit/char
+;
+; WR4:  x x x x x x x x
+;		              1 Parity Enable
+;		            1 Parity Even/Odd
+;		        0 0 Sync Modes enable
+;		        0 1 1 stop bit / char
+;		        1 0 1 1/2 stop bits/char
+;		        1 1 2 stop bits/char
+;		    0 0 8bit sync character
+;		    0 1 16bit sync char
+;		    1 0 SDLC mode (01111110 Flag)
+;		    1 1 External Sync Mode
+;		0 0 x1 Clock Mode
+;		0 1 x16 Clock Mode
+;		1 0 x32 Clock Mode
+;		1 1 x64 Clock Mode
+;
+; WR5:	x x x x x x x x 
+;		              1 Tx CRC Enable
+;		            1 RTS
+;		          1 CRC16/SDLC
+;		        1 Tx Enable 
+;		      1 Send Break
+;		  0 0 Tx 5 bits/char
+;		  0 1 Tx 7 bits/char
+;		  1 0 Tx 6 bits/char
+;		  1 1 Tx 8 bits/char
+;		1 DTR
+;
+; WR6:	x x x x x x x x 
+;		Sync bits 0..7
+;
+; WR7: 	x x x x x x x x
+;		Sync bits 8..16
