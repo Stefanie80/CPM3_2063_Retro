@@ -1,0 +1,116 @@
+
+
+extrn gpiocache
+
+public PRN
+
+	dw	prn_init
+	dw 	prn_istat
+	dw	prn_ostat
+	dw	prn_in
+	dw	prn_out
+PRN:
+	db 	'PRN   '
+	db 	2			; 2 -> output only
+	db 	0			; 0 -> no baudrate
+
+; Ports for the printer
+prn_stp:	db 	000h		; Status bits input port
+prn_ctrl:	db	010h		; Control output port
+prn_dat:	db	020h		; printer data out
+
+; Status bit locations on the port
+prn_err		equ	001h
+prn_stat	equ	002h
+prn_papr	equ	004h
+prn_bsy		equ	008h
+prn_ack		equ	010h
+prn_stb		equ	008h
+	
+	
+prn_istat:
+ret
+
+prn_in:
+ret	
+
+;##########################################################################
+; Just set the print strobe & line-feed signals high.
+;
+; NOTE: The line-feed signal is ignored here and is assumed to be
+;	left set high by the init code in the SIO driver!
+;
+; Clobbers AF
+;##########################################################################
+prn_init:
+	ld a,(prn_ctrl)
+	ld c,a
+	ld	a,(gpiocache)
+	or	prn_stb	; make PRN_STB high (false)
+	ld	(gpiocache),a	; save in the cached output value
+	out	(c),a		; make it so in the GPIO register too
+	ret
+
+;##########################################################################
+; Return A=0 if printer is not ready.
+; Return A=0xff if printer is ready.
+; Clobbers AF
+;##########################################################################
+prn_ostat:
+	ld a,(prn_stp)
+	ld c,a
+	in	a,(c)
+	and	prn_bsy		; if this bit is low then it is ready
+	jr	z,.prn_stat_ready
+	xor	a			; A=0 = not ready
+	ret
+.prn_stat_ready:
+	dec	a			; A=0xff = ready
+	ret
+
+
+;##########################################################################
+; Print the character in the C register.
+;##########################################################################
+prn_out:
+	ld d,c	; save the char
+	; Sanity check to prevent seizing the entire OS.
+	; If EVERY printer status input is high, then there is probably no
+	; printer attached!  This is reasonable since paper-empty high should
+	; also force gpio_in_prn_err low at same time.
+	ld a,(prn_stp)
+	ld c,a
+	in	a,(c)
+	and	prn_err|prn_stat|prn_papr|prn_bsy|prn_ack
+	cp	prn_err|prn_stat|prn_papr|prn_bsy|prn_ack
+	ret	z			; If all signals high then just discard the data.
+
+	; wait until the printer is ready for data
+	; XXX this can seize the system if the printer is offline!  :-(
+prn_wait:
+	call	prn_ostat
+	;or	a	
+	jr	z,prn_wait		; if A=0 then is not ready
+
+	; proceed to print the character
+	ld	a,c
+	out	(c),d		; put the character code into the output latch
+
+	; assert the strobe signal
+	ld	a,(gpiocache)
+	and	~prn_stb	; set the strobe signal low
+	out	(c),a		; write to port but not update cache!
+
+	; A brief delay so that strobe signal can be seen by the printer.
+	ld	a,010h			; loop 16 times
+stb_wait:
+	dec	a
+	jr	nz,stb_wait
+
+	; raise the strobe signal
+	ld	a,(gpiocache)	; we never updated the cache, so this is right
+	out	(c),a
+	ret
+	
+end
+	
