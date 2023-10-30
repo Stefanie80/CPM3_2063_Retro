@@ -1,6 +1,5 @@
 public fnt8x8
-DSEG
-
+dseg
 fnt8x8:
 db 000h,000h,000h,000h,000h,000h,000h,000h ; 000
 db 07Eh,081h,0A5h,081h,0BDh,099h,081h,07Eh ; 001

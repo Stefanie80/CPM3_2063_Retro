@@ -7,10 +7,10 @@
 
 	public bmpW,bmpH,z80bmp,chrW,chrH
 
-bmpW equ 72
-bmpH equ 64
-chrW equ 9
-chrH equ 8
+bmpW: equ 72
+bmpH: equ 64
+chrW: equ 9
+chrH: equ 8
 DSEG
 z80bmp:
 ;       0         1         2         3         4         5         6         7         8 
