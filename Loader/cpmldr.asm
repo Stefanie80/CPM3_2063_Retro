@@ -38,14 +38,25 @@ bnklen	equ	abase+83h
 osentry	equ	abase+84h
 
 ; function call to hand off register values from ROM to CPM
-extrn handoff
+	extrn handoff
+	regstore equ 0B000h
 
 	cseg
 	
 	; Entry Point
+	
 	; Save the registers (somehow)
-	exx 	; this will be 0xC000
-
+	SBCD regstore
+	SDED regstore+2
+	SHLD regstore+4
+	exx 	
+	SBCD regstore+6
+	SDED regstore+8
+	SHLD regstore+10
+	SIXD regstore+12
+	SIYD regstore+14
+	
+	; this will be 0xC000
 	; Move to 0100h
 	lxi d,0100h
 	lxi h,0C000h
@@ -60,7 +71,6 @@ begin: 	; 0100h+12
 
 	lxi	sp,stackbot
 	
-	exx
 	call	bootf		;first call is to Cold Boot
 
 	mvi	c,resetsys	;Initialize the System
@@ -216,7 +226,7 @@ signon:
 	db	'CP/M V3.0 Loader',cr,lf
 	db	'Copyright (C) 1982, Digital Research'
 	db	cr,lf,'$'
-
+	ds 32
 	db	'021182',0,0,0,0
 stackbot:
 
@@ -261,7 +271,7 @@ ctlh	equ	08h	; backspace
 
 
 ;
-serial: db	0,2,1,1,8,2
+serial: db	0,0,0,0,0,0
 ;
 ;	Enter here from the user's program with function number in c,
 ;	and information address in d,e

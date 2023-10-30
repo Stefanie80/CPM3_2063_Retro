@@ -18,6 +18,8 @@ gpio_out_sd_ssel	equ	04h
 gpio_in_sd_det		equ	40h
 gpio_in_sd_miso		equ	80h
 
+regstore equ 0B000h
+
 extrn bdos
 
 	CSEG
@@ -63,12 +65,22 @@ b_move:
 ret
 
 b_boot:
+	ld bc,(regstore)
+	ld de,(regstore+2)
+	ld hl,(regstore+4)
 	ld (E_BC),bc
 	ld (E_DE),de	; DE:HL = LBA offset
 	ld (E_HL),hl
+	ld bc,(regstore+6)
+	ld de,(regstore+8)
+	ld hl,(regstore+10)
+	ld (E_SBC),bc
+	ld (E_SDE),de	; DE:HL = LBA offset
+	ld (E_SHL),hl
+	ld ix,(regstore+12)
+	ld iy,(regstore+14)
 	ld (E_IX),ix
 	ld (E_IY),iy
-	
 ret		; return to CPMLDR
 
 public handoff 
@@ -77,9 +89,13 @@ handoff:
 	ld bc,(E_BC)
 	ld de,(E_DE)	; DE:HL = LBA offset
 	ld hl,(E_HL)
+	exx
+	ld bc,(E_SBC)
+	ld de,(E_SDE)	; DE:HL = LBA offset
+	ld hl,(E_SHL)
+	exx
 	ld ix,(E_IX)
 	ld iy,(E_IY)
-
 ret
 
 b_sectrn:
@@ -160,26 +176,6 @@ sd_readblock:
 	call sd_rx	; CRC
 	call sdraise_cs
 	
-	; ld bc,(b_sector)
-	; ld a,00000011b
-	; and c
-	; push af
-	; ld hl,buffer-128
-	; or a
-	; jr z,reczero
-	; pop af
-	; push af
-	; ld de,128
-	; ld b,a
-	; inc b
-; recadd:
-	; add hl,de
-	; djnz recadd
-; reczero:
-	; pop af
-	; ld de,(b_dma)
-	; ld bc,128
-	; ldir
 if debug
 	ld b,128
 	ld hl,(b_dma)
@@ -628,6 +624,9 @@ sderr:		db 'SD card Error: ', cr, lf, '$'
 E_BC:	dw 0
 E_DE:	dw 0
 E_HL:	dw 0
+E_SBC:	dw 0
+E_SDE:	dw 0
+E_SHL:	dw 0
 E_IX:	dw 0
 E_IY:	dw 0
 
@@ -657,9 +656,9 @@ B_DPB:
 	BLM:	db	63
 	EXM:	db	3
 	DSM:	dw	7FFFh
-	DRM:	dw	1023
-	AL0:	db	11110000b
-	AL1:	db	00000000b
+	DRM:	dw	4000
+	AL0:	db	0FFh
+	AL1:	db	0FFh
 	CKS:	dw	8000h
 	OFF:	dw	2
 	PSH:	db	2
