@@ -9,9 +9,10 @@
 true	equ -1
 false	equ not true
 banked	equ true
-.debug:		equ	0
-m_debug		equ 0
-VDP			equ 1
+
+.debug		equ	false
+m_debug		equ false
+VDP			equ false
 VDP_font 	equ 0
 RTC_debug	equ 0
 
@@ -40,56 +41,34 @@ RTC_debug	equ 0
 
 	extrn disk_dump, dumpdpb, dumpdtbl, hexdmp
 	extrn hexdump_a, dumpdma, dump_regs, dumpivars
-
+	
 ; These are all the publics from USER.Z80
 ;##########################################################################
 
 	extrn usrfunc
 
-
+if VDP
+	extrn vdp_out,curs_tick,curs0,curs1
+endif
 
 cr			equ	0dh		; carriage return
 lf			equ	0ah		; line feed
 
 
-;****************************************************************************
-;
-;    Copyright (C) 2021 John Winans
-;
-;    This library is free software; you can redistribute it and/or
-;    modify it under the terms of the GNU Lesser General Public
-;    License as published by the Free Software Foundation; either
-;    version 2.1 of the License, or (at your option) any later version.
-;
-;    This library is distributed in the hope that it will be useful,
-;    but WITHOUT ANY WARRANTY; without even the implied warranty of
-;    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-;    Lesser General Public License for more details.
-;
-;    You should have received a copy of the GNU Lesser General Public
-;    License along with this library; if not, write to the Free Software
-;    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301
-;    USA
-;
-; https://github.com/johnwinans/2063-Z80-cpm
-;
-;****************************************************************************
-
-
-
-
 CSEG
 
 	;public console routines
-	public	?cinit,?ci,?co,?cist,?cost
+	;public	?cinit,?ci,?co,?cist,?cost
+	extrn	?cinit,?ci,?co,?cist,?cost
+	extrn devtbl,getdev
 	public con_tx_char,con_rx_ready
 
 	;public values for SPI
-	public	mosi,sdclk,sdsel,miso
-	mosi	equ	gpio_out_sd_mosi
-	miso	equ	gpio_in_sd_miso
-	sdclk	equ	gpio_out_sd_clk
-	sdsel	equ	gpio_out_sd_ssel
+	; public	mosi,sdclk,sdsel,miso
+	; mosi	equ	gpio_out_sd_mosi
+	; miso	equ	gpio_in_sd_miso
+	; sdclk	equ	gpio_out_sd_clk
+	; sdsel	equ	gpio_out_sd_ssel
 
 	public 	gpio_in,gpio_out,gpiocache
 
@@ -111,18 +90,15 @@ CSEG
 		sbinit	equ	siob_init
 
 	;publics for CTC
-	public 	ictc0,ictc1,ictc2,ictc3
-		ictc0 equ init_ctc_0
+	public 	ictc1,ictc2,ictc3
 		ictc1 equ init_ctc_1
 		ictc2 equ init_ctc_2
 		ictc3 equ init_ctc_3
 
 	;publics for debug
 	public puts_crlf,cr,lf,iputs,puts
-	;public spamon,spamoff
+	public spamon,spamoff
 
-	extrn disk_dump, dumpdpb, dumpdtbl, hexdmp
-	extrn hexdump_a, dumpdma, dump_regs, dumpivars
 
 	public setbank
 if VDP	
@@ -185,6 +161,83 @@ rtc_limit:			db 153		; IRQ will happen at a freq of (CLK/256/256)
 joyport0		equ	0a8h		; I/O port for joystick 0
 joyport1		equ	0a9h		; I/O port for joystick 1
 
+; Storage for parameters 
+; passed in by the ROM Setup
+	public RBC,RDE,RHL,RSBC,RSDE,RSHL,RIX,RIY
+RBC: 	dw 0
+RDE: 	dw 0
+RHL: 	dw 0
+RSBC:	dw 0
+RSDE:	dw 0
+RSHL:	dw 0
+RIX:	dw 0
+RIY:	dw 0
+
+	public storeregs
+storeregs:
+	ld (RBC),bc		; B= Baudrates, C= Boot partition Nr.
+	ld (RDE),de		; DE:HL Boot partition offset
+	ld (RHL),hl
+	exx
+	ld (RSBC),bc 	; shadow registers currently unused
+	ld (RSDE),de
+	ld (RSHL),hl
+	exx
+	ld (RIX),ix		; COVEC from ROM
+	ld (RIY),iy		; CIVEC from ROM
+	
+	ld a,b
+	and 00Fh		; Low Nibble = SIO-B
+	;ld (baudb),a
+	ld c,a
+	ld b,1
+	call getdev
+	ld (ix+7),c
+	
+	ld bc,(RBC)
+	ld a,b
+	rra
+	rra
+	rra
+	rra
+	and 00Fh		; High Nibble = SIO-A
+	ld c,a
+	ld b,0
+	call getdev
+	ld (ix+7),c
+	;ld (bauda),a
+	; ld hl,RBC
+	; ld bc,16
+	; ld e,0
+	; call hexdmp
+ret
+
+setbaud:
+	; get a device number in B
+	; and a baud nibble in A
+	ld c,a
+	push bc
+	call devtbl		; prepare device table
+	; HL -> table
+	pop bc
+	push bc
+	ld a,b
+	or a
+	jr z,dev0
+	ld de,8
+sbadd:
+	add hl,de
+	djnz sbadd
+dev0:
+	ld de,7			; add 7 more bytes to skip the name and capabilities
+	add hl,de
+	; set baudrate Nibble
+	pop bc
+	ld (hl),c
+	; call init for the device
+	ld c,b
+	call ?cinit
+ret
 ; serbufa:	ds 16	; 16 bytes recieve buffer
 ; bufaptr:	db 0
 ; serbufb:	ds 16
@@ -193,29 +246,6 @@ joyport1		equ	0a9h		; I/O port for joystick 1
 ;###############################################
 ; Character devices
 ;###############################################
-
-	public	@ctbl
-	
-@ctbl:
-	db 	'SIO-A '	; device 0, 
-	db	0Fh
-	db 	14			; 14 -> 9600bps
-	db 	'SIO-B '	; device 1, 
-	db 	0Fh
-	db 	15			; 15 -> 19200bps (?)
-	db 	'PRN   '
-	db 	2			; 2 -> output only
-	db 	0			; 0 -> no baudrate
-if VDP
-	db 	'VDP   '
-	db 	3			; 2 -> output only
-	db 	0			; 0 -> no baudrate
-else	
-	db	'DUMMY '	; Dummy Device
-	db	3			; In+Out
-	db	0
-endif
-	db 	0			; table terminator
 		
 @bdtbl:
 	db	0,0,0,0, 1,      2,     3,     192, 96,   64,   48,   32,   24,   16,   12,   6
@@ -225,18 +255,18 @@ endif
 ; Interrupt service routines
 ;###############################################
 					
-public isrflags
+; public isrflags
 
-isrflags:
-	db 03h 		; D0: J0 active, D1: J1 active, D2: J0 flag, D3: J1 flag
-joyv0:
-	db 00h		; most recent value from port
-	db 00h		; last reported value
-joyv1:
-	db 00h		; most recent value from port
-	db 00h		; last reported value
-tmp:
-	db 00h		; temporary storage for ISR
+; isrflags:
+	; db 03h 		; D0: J0 active, D1: J1 active, D2: J0 flag, D3: J1 flag
+; joyv0:
+	; db 00h		; most recent value from port
+	; db 00h		; last reported value
+; joyv1:
+	; db 00h		; most recent value from port
+	; db 00h		; last reported value
+; tmp:
+	; db 00h		; temporary storage for ISR
 
 ;###############################################
 ; Joystick Character Device
@@ -248,188 +278,215 @@ tmp:
 
 ; Define two lists of bytes to return for Joysticks
 ; These should be changeable by a USER function call
-	public j0keys,j1keys
-j0keys:	db '4','7','8','9','6','3','2','1','5','0' 	; Left,LeftUp,Up,UpRight,Right,RightDown,Down,LeftDown,Fire,Button2
-j1keys:	db '4','7','8','9','6','3','2','1','5','0' 	; Left,LeftUp,Up,UpRight,Right,RightDown,Down,LeftDown,Fire,Button2
+	; public j0keys,j1keys
+; j0keys:	db '4','7','8','9','6','3','2','1','5','0' 	; Left,LeftUp,Up,UpRight,Right,RightDown,Down,LeftDown,Fire,Button2
+; j1keys:	db '4','7','8','9','6','3','2','1','5','0' 	; Left,LeftUp,Up,UpRight,Right,RightDown,Down,LeftDown,Fire,Button2
 
-joy_rx_char:
-	call j0rdy
-	or a
-	jr z,joy_rx_char
-	call j0char
-	ret
+; joy_rx_char:
+	; call j0rdy
+	; or a
+	; jr z,joy_rx_char
+	; call j0char
+	; ret
 
-; check if j0 has changed since last read
-j0rdy:
-	ld a,(joyv0+1)	; former
-	ld b,a
-	in a,(joyport0)
-	cp b			; zero if no change
-	jr z,.noj0
-	ld b,a
+; ; check if j0 has changed since last read
+; j0rdy:
+	; ld a,(joyv0+1)	; former
+	; ld b,a
+	; in a,(joyport0)
+	; cp b			; zero if no change
+	; jr z,.noj0
+	; ld b,a
 	
-	ld (joyv0),a
-	ret
-.noj0:
-	xor a
-	ret
+	; ld (joyv0),a
+	; ret
+; .noj0:
+	; xor a
+	; ret
 
-	ld a,(isrflags)
-	and 004h
-	ret z		; 0 = no char ready
-	ld a,0FFh	; FF = char ready
-	ret
+	; ld a,(isrflags)
+	; and 004h
+	; ret z		; 0 = no char ready
+	; ld a,0FFh	; FF = char ready
+	; ret
 
 ; check if j1 has changed since last read
-j1rdy:
-	ld a,(isrflags)
-	and 008h
-	ret z		; 0 = no char ready
-	ld a,0FFh	; FF = char ready
-	ret
+; j1rdy:
+	; ld a,(isrflags)
+	; and 008h
+	; ret z		; 0 = no char ready
+	; ld a,0FFh	; FF = char ready
+	; ret
 
 ; return a char depending on j0	in A
 ; D7=Up,D6=Down,D5=Right,D4=Btn2,D3=X,D2=Left,D1=X,D0=Fire
-j0char:
-	ld a,(joyv0+1)		; the former value
-	ld b,a
-	ld a,(joyv0)		; the current value
-	ld c,a
-	; check the buttons first
-	bit 0,c
-	jr nz,.nofire		; non-zero = not pressed
-	bit 0,b				; was it pressed before?
-	jr z,.nofire		; not changed
-		ld a,(j0keys+8)
-		jr .j0ret		; return fire button code
-.nofire:
-	bit 4,c
-	jr nz,.nobtn2		; non-zero = not pressed
-	bit 4,b				; was it pressed before?
-	jr z,.nobtn2		; not changed
-		ld a,(j0keys+9)
-		jr .j0ret		; return button 2 code
-.nobtn2:
-	; if we arrive here, examine D7,D6,D5,D2 
-	; and return the apropriate byte
-	bit 2,c
-	jr nz,.noleft
-	; left is pressed
-	bit 7,c		; Up?
-	jr nz,.noupleft
-	; return left+up 
-	ld a,(j0keys+1)
-	jr .j0ret
-.noupleft:
-	bit 6,c		; Down?
-	jr nz,.nodnleft
-	; return left+down
-	ld a,(j0keys+7)
-	jr .j0ret
-.nodnleft:
-	; return left
-	ld a,(j0keys)
-	jr .j0ret
-.noleft:
-	bit 5,c
-	jr nz,.noright
-	; right is pressed
-	bit 7,c		; Up?
-	jr nz,.noupright
-	; return right+up
-	ld a,(j0keys+3)
-	jr .j0ret
-.noupright:	
-	bit 6,c		; Down ?
-	jr nz,.nodnright
-	; return right+down
-	ld a,(j0keys+5)
-	jr .j0ret
-.nodnright:
-	; return right
-	ld a,(j0keys+4)
-	jr .j0ret
-.noright:
-	; if we make it to here, it can only be up,down, or nothing
-	; all diagonals are already accounted for
-	bit 7,c 	; Up ?
-	jr nz,.noup
-	; return up
-	ld a,(j0keys+2)
-	jr .j0ret
-.noup:	
-	bit 6,c		; down?
-	jr nz,.nodown
-	; return down
-	ld a,(j0keys+6)
-	jr .j0ret
-.nodown:
-	; not a single key/direction.
-	xor a	; return zero
-.j0ret:	
-	; save the current value as last reported one before returning
-	ld b,a	; save the return value
-	ld a,c 	; current value
-	ld (joyv0+1),a	; save as the new former
-	; reset the flag
-	ld a,(isrflags)
-	and 0FBh
-	ld (isrflags),a
-	ld a,b 	; return value in A
-	ret
+; j0char:
+	; ld a,(joyv0+1)		; the former value
+	; ld b,a
+	; ld a,(joyv0)		; the current value
+	; ld c,a
+	; ; check the buttons first
+	; bit 0,c
+	; jr nz,.nofire		; non-zero = not pressed
+	; bit 0,b				; was it pressed before?
+	; jr z,.nofire		; not changed
+		; ld a,(j0keys+8)
+		; jr .j0ret		; return fire button code
+; .nofire:
+	; bit 4,c
+	; jr nz,.nobtn2		; non-zero = not pressed
+	; bit 4,b				; was it pressed before?
+	; jr z,.nobtn2		; not changed
+		; ld a,(j0keys+9)
+		; jr .j0ret		; return button 2 code
+; .nobtn2:
+	; ; if we arrive here, examine D7,D6,D5,D2 
+	; ; and return the apropriate byte
+	; bit 2,c
+	; jr nz,.noleft
+	; ; left is pressed
+	; bit 7,c		; Up?
+	; jr nz,.noupleft
+	; ; return left+up 
+	; ld a,(j0keys+1)
+	; jr .j0ret
+; .noupleft:
+	; bit 6,c		; Down?
+	; jr nz,.nodnleft
+	; ; return left+down
+	; ld a,(j0keys+7)
+	; jr .j0ret
+; .nodnleft:
+	; ; return left
+	; ld a,(j0keys)
+	; jr .j0ret
+; .noleft:
+	; bit 5,c
+	; jr nz,.noright
+	; ; right is pressed
+	; bit 7,c		; Up?
+	; jr nz,.noupright
+	; ; return right+up
+	; ld a,(j0keys+3)
+	; jr .j0ret
+; .noupright:	
+	; bit 6,c		; Down ?
+	; jr nz,.nodnright
+	; ; return right+down
+	; ld a,(j0keys+5)
+	; jr .j0ret
+; .nodnright:
+	; ; return right
+	; ld a,(j0keys+4)
+	; jr .j0ret
+; .noright:
+	; ; if we make it to here, it can only be up,down, or nothing
+	; ; all diagonals are already accounted for
+	; bit 7,c 	; Up ?
+	; jr nz,.noup
+	; ; return up
+	; ld a,(j0keys+2)
+	; jr .j0ret
+; .noup:	
+	; bit 6,c		; down?
+	; jr nz,.nodown
+	; ; return down
+	; ld a,(j0keys+6)
+	; jr .j0ret
+; .nodown:
+	; ; not a single key/direction.
+	; xor a	; return zero
+; .j0ret:	
+	; ; save the current value as last reported one before returning
+	; ld b,a	; save the return value
+	; ld a,c 	; current value
+	; ld (joyv0+1),a	; save as the new former
+	; ; reset the flag
+	; ld a,(isrflags)
+	; and 0FBh
+	; ld (isrflags),a
+	; ld a,b 	; return value in A
+	; ret
 
-;###############################################
-; Timer 0 -> Joysticks
-;###############################################
+; ;###############################################
+; ; Timer 0 -> Joysticks
+; ;###############################################
 
-ctc0_isr:
-	push af
-	push bc
-	;push de
-	;push hl
+; ctc0_isr:
+	; push af
+	; push bc
+	; ;push de
+	; ;push hl
 
-	ld a,(isrflags)
-	and 001h
-	jr z,.jp2
-	; read joy0 here
+	; ld a,(isrflags)
+	; and 001h
+	; jr z,.jp2
+	; ; read joy0 here
 	
-	ld a,(joyv0)		; get the old value
-	ld b,a
-	in a,(joyport0)		; get the new value
-	cp b		; changed?
-	jr z,.jp2
-	; changed, set a flag
-	ld a,(isrflags)
-	or 004h
-	ld (isrflags),a
-	; and save the new byte
-	ld (joyv0),a 
+	; ld a,(joyv0)		; get the old value
+	; ld b,a
+	; in a,(joyport0)		; get the new value
+	; cp b		; changed?
+	; jr z,.jp2
+	; ; changed, set a flag
+	; ld a,(isrflags)
+	; or 004h
+	; ld (isrflags),a
+	; ; and save the new byte
+	; ld (joyv0),a 
 
-.jp2:
-	ld a,(isrflags)
-	and 002h
-	jr z,.isr_tail
-	; read joy1 here
+; .jp2:
+	; ld a,(isrflags)
+	; and 002h
+	; jr z,.isr_tail
+	; ; read joy1 here
 
-	ld a,(joyv1)		; get the old value
-	ld b,a
-	in a,(joyport1)		; get the new value
-	cp b		; changed?
-	jr z,.isr_tail
-	; changed, set a flag
-	ld a,(isrflags)
-	or 008h
-	ld (isrflags),a
-	; and save the new byte
-	ld (joyv1),a
+	; ld a,(joyv1)		; get the old value
+	; ld b,a
+	; in a,(joyport1)		; get the new value
+	; cp b		; changed?
+	; jr z,.isr_tail
+	; ; changed, set a flag
+	; ld a,(isrflags)
+	; or 008h
+	; ld (isrflags),a
+	; ; and save the new byte
+	; ld (joyv1),a
 
-.isr_tail:
-	;pop hl
-	;pop de
-	pop bc
-	pop af
-	ei
-	reti
+; .isr_tail:
+	; ;pop hl
+	; ;pop de
+	; pop bc
+	; pop af
+	; ei
+	; reti
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ;###############################################
 ; Timer 3 -> RTC
@@ -523,18 +580,31 @@ setbank:
 if m_debug
 	push af
 	call iputs
-	db 'SETBNK: ',0
+	db ' SETBNK: ',0
+	;call spamon	
+	pop af
+	push af
+	call hexdump_a
+	;call spamoff
+	call iputs
+	db ' C:',0
 	ld a,(@cbnk)
 	call hexdump_a
     call    iputs
-    db ',',0
+    db ' D:',0
     ld a,(@dbnk)
     call hexdump_a
 	call    iputs
-    db ' -> ',0
+    db ' O:',0
+    ld	a,(gpiocache)
+	and 0f0h	; mask out the lower nibble
+	call hexdump_a
+	;call    iputs
+    ;db ' -> ',0
 	pop af
 	push af
-	call dump_regs
+	;call dump_regs
+	call puts_crlf
 	pop af
 endif	
 	add a,a
@@ -555,63 +625,63 @@ endif
 ;###############################################
 	DSEG
 
-?cinit:
-	; C = 0
-	ld a,c				; C= device number
-	or a
-	jr nz,.notsioa
-	; SIO-A init
-	;push af
-	; @ctbl+7
-	ld a,(@ctbl+7)			; Get Baudrate for Device 0
-	ld b,0
-	ld c,a					; make 16bit value
-	; @bdtbl
-	ld hl,@bdtbl
-	add hl,bc
-	ld	c,(hl)				; C=192=600bps, C=96=1200bps, C=48=2400bps, C=24=4800bps, C=12=9600bps, C=6=19200bps, C=3=38400, C=1=115200bps
-	call	init_ctc_1		; start CTC1 in case J11-A selects it!
-	call	sioa_init		; 115200 or 19200/9600 depending on J11-A
-	ret
-.notsioa:
-	; C = 1
-	dec a
-	jr nz,.notsiob
-	; SIO-B init
-	ld a,(@ctbl+14)			; Get Baudrate for Device 1
-	ld b,0
-	ld c,a					; make 16bit value
-	; @bdtbl
-	ld hl,@bdtbl
-	add hl,bc
-	ld	c,(hl)				; C=192=600bps, C=96=1200bps, C=48=2400bps, C=24=4800bps, C=12=9600bps, C=6=19200bps, C=3=38400, C=1=115200bps
-	call	init_ctc_2		; start CTC2 in case J11-B selects it!
-	call	siob_init		; 115200 or 19200/9600 depending on J11-A
-	ret
-.notsiob:
-	; C = 2
-	dec a
-	jr nz,.notprn
-	; PRN init
-	call prn_init
-	ret
-.notprn:
-	; C = 3
-	dec a
-	jr nz,.notvdp
-if VDP
-	ld bc,0101h			; B=1=vdp,C=1=Init
-	call usrfunc			; VDP init is done in the bootloader
-endif	
-	ret
-.notvdp:
-	; C >= 4
-	cp 0fh
-	jr nz,.nodev
-	;call init_ctc_3
-.nodev:	
-	; invalid device
-	ret
+; ?cinit:
+	; ; C = 0
+	; ld a,c				; C= device number
+	; or a
+	; jr nz,.notsioa
+	; ; SIO-A init
+	; ;push af
+	; ; @ctbl+7
+	; ld a,(@ctbl+7)			; Get Baudrate for Device 0
+	; ld b,0
+	; ld c,a					; make 16bit value
+	; ; @bdtbl
+	; ld hl,@bdtbl
+	; add hl,bc
+	; ld	c,(hl)				; C=192=600bps, C=96=1200bps, C=48=2400bps, C=24=4800bps, C=12=9600bps, C=6=19200bps, C=3=38400, C=1=115200bps
+	; call	init_ctc_1		; start CTC1 in case J11-A selects it!
+	; call	sioa_init		; 115200 or 19200/9600 depending on J11-A
+	; ret
+; .notsioa:
+	; ; C = 1
+	; dec a
+	; jr nz,.notsiob
+	; ; SIO-B init
+	; ld a,(@ctbl+14)			; Get Baudrate for Device 1
+	; ld b,0
+	; ld c,a					; make 16bit value
+	; ; @bdtbl
+	; ld hl,@bdtbl
+	; add hl,bc
+	; ld	c,(hl)				; C=192=600bps, C=96=1200bps, C=48=2400bps, C=24=4800bps, C=12=9600bps, C=6=19200bps, C=3=38400, C=1=115200bps
+	; call	init_ctc_2		; start CTC2 in case J11-B selects it!
+	; call	siob_init		; 115200 or 19200/9600 depending on J11-A
+	; ret
+; .notsiob:
+	; ; C = 2
+	; dec a
+	; jr nz,.notprn
+	; ; PRN init
+	; call prn_init
+	; ret
+; .notprn:
+	; ; C = 3
+	; dec a
+	; jr nz,.notvdp
+; if VDP
+	; ld bc,0101h			; B=1=vdp,C=1=Init
+	; call usrfunc			; VDP init is done in the bootloader
+; endif	
+	; ret
+; .notvdp:
+	; ; C >= 4
+	; cp 0fh
+	; jr nz,.nodev
+	; ;call init_ctc_3
+; .nodev:	
+	; ; invalid device
+	; ret
 
 	CSEG
 
@@ -620,104 +690,107 @@ endif
 ; Input: B = Device Number
 ;###############################################
 
-?ci:
-	ld a,b
-	or a
-	jp z,sioa_rx_char
-	dec a
-	jp z,siob_rx_char
-	dec a
-	jp z,.ci_ret ; no prn input
-	dec a
-	jp z,joy_rx_char
-	; other devices have no input
-.ci_ret:	
-	ret
+; ?ci:
+	; ld a,b
+	; or a
+	; jp z,sioa_rx_char
+	; dec a
+	; jp z,siob_rx_char
+	; dec a
+	; jp z,.ci_ret ; no prn input
+	; dec a
+	; jp z,joy_rx_char
+	; ; other devices have no input
+; .ci_ret:	
+	; ret
 
 ;###############################################
 ; Console Output
 ; Input: B = Device Number
 ;###############################################
 
-?co:
-	ld a,b				; B = device number
-	or a
-	jp z,sioa_tx_char	; B >= 1
-	dec a
-	jp z,siob_tx_char	; B >= 2
-	dec a
-	jp z,prn_out		; B >= 3
-	dec a
-if VDP
-	jp z,vdp_out
-endif
-	ret
+; ?co:
+	; ld a,b				; B = device number
+	; or a
+	; jp z,sioa_tx_char	; B >= 1
+	; dec a
+	; jp z,siob_tx_char	; B >= 2
+	; dec a
+	; jp z,prn_out		; B >= 3
+	; dec a
+; if VDP
+	; jp z,vdp_out
+; endif
+	; ret
 
 ;###############################################
 ; Input status
 ; Input: B = Device Number
 ;###############################################
 
-?cist:
-if VDP
-	push bc
-	call curs_tick
-	pop bc
-endif
-	ld a,b
-	or a
-	jr nz,.nota
-	call sioa_rx_ready
-	ret	z		; A = 0 = not ready
-	ld	a,0ffh
-	ret			; A = 0xff = ready
-.nota:
-	dec b
-	jr nz,.notb
-	call siob_rx_ready
-	ret	z		; A = 0 = not ready
-	ld	a,0ffh
-	ret			; A = 0xff = ready
-.notb:
-	dec b
-	jr nz,.notpr
-	; printer has no input?
-	ret
-.notpr:
-	; this should be Joysticks
-	jp j0rdy
-	ret
+; ?cist:
+; if VDP
+	; push bc
+	; call curs_tick
+	; pop bc
+; endif
+	; ld a,b
+	; or a
+	; jr nz,.nota
+	; call sioa_rx_ready
+	; ret	z		; A = 0 = not ready
+	; ld	a,0ffh
+	; ret			; A = 0xff = ready
+; .nota:
+	; dec b
+	; jr nz,.notb
+	; call siob_rx_ready
+	; ret	z		; A = 0 = not ready
+	; ld	a,0ffh
+	; ret			; A = 0xff = ready
+; .notb:
+	; dec b
+	; jr nz,.notpr
+	; ; printer has no input?
+	; ret
+; .notpr:
+	; ; this should be Joysticks
+	; jp j0rdy
+	; ret
 
 ;###############################################
 ; Output Status
 ; Input: B = Device Number
 ;###############################################
 
-?cost:
-	ld a,b
-	or a
-	jr nz,.ost1
-	call sioa_tx_ready
-	ret	z		; A = 0 = not ready
-	ld	a,0ffh
-	ret			; A = 0xff = ready
-.ost1:
-	dec a
-	jr nz,.ost2
-	call siob_tx_ready
-	ret	z		; A = 0 = not ready
-	ld	a,0ffh
-	ret			; A = 0xff = ready
-.ost2:
-	dec a
-	jr nz,.ost3
-	call prn_stat
-	ret	z		; A = 0 = not ready
-	ld	a,0ffh
-	ret			; A = 0xff = ready
-.ost3:
-	;check VDP ready status?
-	ret
+; ?cost:
+	; ld a,b
+	; or a
+	; jr nz,.ost1
+	; call sioa_tx_ready
+	; ret	z		; A = 0 = not ready
+	; ld	a,0ffh
+	; ret			; A = 0xff = ready
+; .ost1:
+	; dec a
+	; jr nz,.ost2
+	; call siob_tx_ready
+	; ret	z		; A = 0 = not ready
+	; ld	a,0ffh
+	; ret			; A = 0xff = ready
+; .ost2:
+	; dec a
+	; jr nz,.ost3
+	; call prn_stat
+	; ret	z		; A = 0 = not ready
+	; ld	a,0ffh
+	; ret			; A = 0xff = ready
+; .ost3:
+; if VDP
+	; ld a,0FFh	; VDP always ready
+	; ;check VDP ready status?
+; endif
+	; ret
 
 ; Drivers for the SIO
 
@@ -840,14 +913,14 @@ sioa_rx_char:
 ; CTC 0  
 ;#############################################################################
 
-init_ctc_0:
-	ld	a,0b7h			; EI, timer mode, /256 prescale, TC follows, reset, ctl
-	out	(ctc_0),a
-	xor a				; 0=256 (as slow as it can go = system_clock_hz/256/256)
-	out	(ctc_0),a
-	ld hl,ctc0_isr
-	ld (IVTbase),hl		; load the ISR into the IVT
-	ret
+; init_ctc_0:
+	; ld	a,0b7h			; EI, timer mode, /256 prescale, TC follows, reset, ctl
+	; out	(ctc_0),a
+	; xor a				; 0=256 (as slow as it can go = system_clock_hz/256/256)
+	; out	(ctc_0),a
+	; ld hl,ctc0_isr
+	; ld (IVTbase),hl		; load the ISR into the IVT
+	; ret
 
 ;#############################################################################
 ; Init the bit-rate generator for SIO A.
@@ -952,18 +1025,6 @@ puts_crlf:
         defb    cr,lf,0
         ret
 
-if .debug
-spamon:
-	ld a,16
-	out (0FDh),a
-	ret
-	
-spamoff:
-	xor a,a
-	out (0FDh),a
-	ret
-endif
-
 ;############################################################################
 ; An library suitable for tallking to an Epson RX-80 printer.
 ;############################################################################
@@ -1043,494 +1104,15 @@ prn_out:
 	out	(gpio_out),a
 	ret
 
-if VDP
-.debug_vdp:		equ 0
-	
-.vdp_cr:		; Return to start of line
-	call vdp_curs
-	xor a
-	ld (vdp_x),a
+CSEG
+spamon:
+	ld a,16
+	out (0FDh),a
 	ret
 	
-.vdp_lf:		; Advance one line
-	;call vdp_curs	
-	ld a,(vdp_y)
-	cp vdp_lines
-	jr nz,.nextline
-	call .vdp_scroll
-	jr .clearline
-.nextline:
-	ld a,(vdp_y)
-	inc a
-	ld (vdp_y),a
-.clearline:
-	; clear the line, too!
-	ld a,(vdp_y)
-	ld d,a		; D = Line number
-	xor a
-	ld e,a		; E = column = 0 
-	ld a,' '	
-	ld c,a		; C = space character
-	ld a, vdp_cols
-	ld b,a		; our loop counter
-.clr_chr:
-	push bc
-	push de
-	call vdp_char
-	pop de
-	pop bc
-	inc e
-	dec b
-	jr nz,.clr_chr
-	;pop af
-	;xor a
-	;ld (vdp_x),a
+spamoff:
+	xor a,a
+	out (0FDh),a
 	ret
-
-;###############################################
-; Delay for writing to VDP
-; TODO: Set delay counter according to CPU Clock
-;###############################################
-
-public vdp_cnt
-vdp_cnt: db 3
-
-.vdp_delay:
-	push af
-	ld a,(vdp_cnt)
-.delloop:
-	dec a
-	jr nz,.delloop
-	pop af
-	ret
-	
-.linebuf:
-	ds 40
-
-;###############################################
-; Scroll the screen
-;###############################################
-	
-.vdp_scroll:
-	ld c,23				; 23 lines to scroll
-	ld hl,0828h			; starting address
-
-.scroll2:
-	push bc				; save counter
-	push hl				; save address
-	; read line 1
-	ld c,40
-	ld hl,.linebuf		; Buffer for one line
-	pop de				; VRAM address of line 1
-	push de				; leave on stack
-	ld a,e
-	out (vdp_reg),a		; address LSB
-	call .vdp_delay
-	ld a,d
-	out (vdp_reg),a		; VDP address loaded
-.scroll0:
-	call .vdp_delay
-	in a,(vdp_vram)	; read VRAM
-	ld (hl),a			; store byte
-	inc hl				; advance pointer
-	dec c
-	jr nz,.scroll0
-
-	; write to line 0
-	ld c,40
-	pop hl
-	ld de,028h
-	sbc hl,de
-	ex de,hl
-	push de
-	ld hl,.linebuf		; Buffer for one line
-	ld a,e
-	out (vdp_reg),a		; address LSB
-	call .vdp_delay
-	ld a,040h
-	or d
-	out (vdp_reg),a		; VDP address loaded
-.scroll1:
-	ld a,(hl)
-	call .vdp_delay
-	out (vdp_vram),a
-	inc hl
-	dec c
-	jr nz,.scroll1
-						; one line scrolled, next?
-	pop hl
-	ld de,050h
-	add hl,de
-	pop bc
-	dec c
-	jr nz,.scroll2
-	ret
-	
-.vdp_crlf:		; Start a new line
-	call .vdp_cr
-	call .vdp_lf
-	ret
-
-.vdp_bs:
-	; ld c,' '
-	; call vdp_char
-	ld a,(vdp_x)
-	dec a
-	ld (vdp_x),a
-	;ld c,' '
-	;call vdp_char
-	ret
-	
-;###############################################
-; Print a character to VRAM
-;###############################################
-
-vdp_char:			; print char in C at coordinates in D:E
-	push bc			; save character
-	ld hl,0			; clear HL
-	ld l,e			
-	ld c,d
-	ld de,0			; clear DE
-	ld a,vdp_cols
-	ld e,a
-.addloop0:
-	add hl,de
-	dec c
-	jp m,.noadd
-	jr nz,.addloop0
-.noadd:	
-	ld de,0800h		; offset for VRAM
-	add hl,de
-	ld a,l
-	out (vdp_reg),a
-	ld a,040h
-	or h
-	out (vdp_reg),a	; VDP address loaded
-	pop bc
-	ld a,(vdp_rev)
-	or a
-	jr z,.notrev
-	ld a,c
-	or 080h
-.notrev:	
-	ld a,c
-	out (vdp_vram),a	; Write to the VDP
-	ret
-
-.vdp_ul:
-	ld hl,vdp_y
-	dec (hl)
-	ret
-
-.vdp_fs:
-	ld hl,vdp_x
-	inc (hl)
-	ret
-
-;###############################################
-; Clear Screen / Home Cursor
-;###############################################
-	
-.vdp_cls:
-	ld bc,0106h					; B=1=vdp,C=6=CLS
-	call usrfunc
-	; fall through into Home
-.vdp_home:
-	xor a
-	ld (vdp_x),a
-	ld (vdp_y),a
-	ret
-
-;###############################################
-; Start ESC sequence
-;###############################################
-
-.vdp_escape:
-	ld a,1
-	ld (vdp_esc),a
-	ret
-
-.term_fg:
-	xor a
-	ld (vdp_bg),a
-	ret
-	
-.term_bg:
-	ld a,1
-	ld (vdp_bg),a
-	ret
-
-;###############################################
-; Process ESC sequence
-;###############################################
-
-.term_cmd:
-	ld a,(vdp_state)
-	or a
-	jr z,.state0
-	dec a
-	jr z,.term_atr
-	jr .term_xy
-.state0:	
-	ld a,c
-	cp '='			; Load cursor position
-	jr z,.term_xy
-	cp 'G'			; Set Video Attributes
-	jr z,.term_atr
-	cp '('			; Set Foreground mode
-	jr z,.term_fg
-	cp ')'			; Set Background mode
-	jr z,.term_bg
-	
-	;invalid control sequence
-	xor a
-	ld (vdp_state),a
-	ld (vdp_esc),a
-	ret
-	
-;###############################################
-; Set Position
-;###############################################
-	
-.term_xy:
-	ld a,(vdp_state)
-	or a
-	jr z,.xy_state0
-	dec a
-	jr z,.xy_end
-	dec a
-	jr z,.xy_row
-	dec a
-	jr z,.xy_col
-	ret
-.xy_row:
-	ld a,c
-	sub 32
-	ld (vdp_y),a
-	ld hl,vdp_state
-	inc (hl)
-	ret
-.xy_col:
-	ld a,c
-	sub 32
-	ld (vdp_x),a
-	jr .xy_end
-.xy_state0:
-	ld a,2
-	ld (vdp_state),a
-	ret
-.xy_end:
-	xor a
-	ld (vdp_state),a
-	ld (vdp_esc),a
-	ret
-
-;###############################################
-; Set Terminal Attributes
-;###############################################
-
-.term_atr:
-	ld a,(vdp_state)
-	or a
-	jr z,.atr_state0
-	dec a
-	jr nz,.atr_end
-	ld a,c
-	cp '0'
-	jr z,.vdp_mode_def
-	cp '4'
-	jr z,.vdp_mode_rev
-	cp 'P'
-	jr z,.vdp_mode_def
-	cp 'T'
-	jr z,.vdp_mode_rev
-	jr .atr_end
-.atr_state0:
-	ld a,1
-	ld (vdp_state),a
-	ret
-.atr_end:
-	xor a
-	ld (vdp_state),a
-	ld (vdp_esc),a
-	ret
-.vdp_mode_def:
-	xor a
-	ld (vdp_rev),a
-	ret
-.vdp_mode_rev:
-	ld a,1
-	ld (vdp_rev),a
-	ret
-
-;###############################################
-; Process Character
-;###############################################
-	
-vdp_out:
-	push bc
-	call vdp_curs	; remove the cursor
-	pop bc
-	ld a,(vdp_esc)	; check if a ESC sequence has been started
-	or a
-	jp nz,.term_cmd	; byte is part of ESC sequence, process separately
-	ld a,c
-		; check non-printable characters
-	cp a,01Bh		; ESC
-	jp z,.vdp_escape
-	cp a,00Ah		; linefeed
-	jp z,.vdp_lf
-	cp a,00Dh		; carriage return
-	jp z,.vdp_cr
-	cp a,008h		; Backspace
-	jp z,.vdp_bs
-	cp a,00Bh		; Upline
-	jp z,.vdp_ul
-	cp a,00Ch		; Forespace
-	jp z,.vdp_fs
-	cp a,01Ah		; CLS
-	jp z,.vdp_cls
-	cp a,01Eh		; Home
-	jp z,.vdp_home
-		; if we get here, we have a printable character
-	ld a,(vdp_x)
-	ld e,a
-	ld a,(vdp_y)
-	ld d,a
-	call vdp_char
-		; advance cursor position
-	ld hl,vdp_x
-	inc (hl)
-	call vdp_cursor
-	ret
-
-;###############################################
-; Print Cursor
-;###############################################
-
-vdp_cursor:
-	ld a,(vdp_x)
-	or a
-	jr z,.curende
-	ld a,(vdp_x)
-	ld e,a
-	ld a,(vdp_y)
-	ld d,a
-	ld a,(cursor)
-	ld c,a
-	call vdp_char
-.curende:	
-	ret
-	
-;###############################################
-; Remove Cursor
-;###############################################
-	
-vdp_curs:
-	ld a,(vdp_x)
-	or a
-	jr z,.curend
-	ld a,(vdp_x)
-	ld e,a
-	ld a,(vdp_y)
-	ld d,a
-	ld a,' '
-	ld c,a
-	call vdp_char
-.curend:
-	ret
-
-;###############################################
-; Make Cursor Blink
-;###############################################
-
-curs_tick:
-	ld hl,(c_tick)
-	inc hl
-	ld (c_tick),hl
-	ld a,(c_mode)
-	or a
-	jp nz,.cmode1
-	ld a,h
-	and 010h
-	jr z,.zer0
-	ld a,(curs1)
-	ld (cursor),a
-	call vdp_cursor
-	ret
-.zer0:	
-	ld a,(curs0)
-	ld (cursor),a
-	call vdp_cursor
-	ret
-.cmode1:
-	;ld a,(vdp_x)
-	;or a
-	;jp z,.ende
-	ld a,h
-	and 080h
-	jp z,.ende
-	ld hl,0			; clear HL
-	ld (c_tick),hl
-	ld a,(vdp_x)
-	ld l,a	
-	ld a,(vdp_y)
-	ld c,a
-	ld de,0			; clear DE
-	ld a,vdp_cols
-	ld e,a
-.addloop1:
-	add hl,de
-	dec c
-	jp m,.noadd1
-	jr nz,.addloop1
-.noadd1:	
-	ld de,0800h		; offset for VRAM
-	add hl,de
-	ld a,l
-	out (vdp_reg),a
-	call .vdp_delay
-	xor a
-	or h
-	out (vdp_reg),a	; VDP address loaded
-	call .vdp_delay
-	in a,(vdp_vram)
-	call .vdp_delay
-	xor 080h
-	push af
-	ld a,l
-	out (vdp_reg),a
-	call .vdp_delay
-	ld a,040h		
-	or h
-	out (vdp_reg),a	; VDP address loaded
-	call .vdp_delay
-	pop af
-	out (vdp_vram),a
-.ende:	
-	ret
-
-;###############################################
-; Variables for VDP
-;###############################################
-
-vdp_vram		equ	080h	; VDP port for accessing the VRAM
-vdp_reg			equ	081h	; VDP port for accessing the registers
-vdp_lines		equ 23
-vdp_cols		equ 40
-vdp_x:			db 0
-vdp_y:			db 0
-vdp_esc:		db 0
-vdp_state:		db 0
-vdp_rev:		db 0
-vdp_bg:			db 0
-cursor:			db 0A0h;'_'
-curs0:			db '_' ;0A0h for block
-curs1:			db ' '
-c_tick:			dw 0
-c_mode:			db 1
-
-
-endif
 
 	end

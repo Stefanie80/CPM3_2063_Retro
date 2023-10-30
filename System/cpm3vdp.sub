@@ -18,8 +18,8 @@ r System\dump.z80
 r System\bios3.z80
 r System\sdmbr.z80
 r System\user.z80
-;r System\fnt6x8.z80
-;r System\VDP.z80
+r System\fnt6x8.z80
+r System\VDP.z80
 r System\SIO.z80
 r System\PRNT.z80
 r System\CDTBL.z80
@@ -34,16 +34,15 @@ zmac dump
 zmac bios3
 zmac sdmbr
 zmac user
-;zmac fnt6x8
-;zmac VDP
+zmac fnt6x8
+zmac VDP
 zmac SIO
 zmac PRNT
 zmac CDTBL
 zmac chario.z80
 
 ; linking ...
-LINK BNKBIOS3[OS]=BIOSKRNL,SCB,BOOT,bios3,dump,user,MOVE,DRVTBL,sdmbr,cdtbl,sio,prnt,chario
-;,vdp,fnt6x8
+LINK BNKBIOS3[OS]=BIOSKRNL,SCB,BOOT,bios3,dump,user,MOVE,DRVTBL,sdmbr,cdtbl,sio,prnt,chario,vdp,fnt6x8
 
 r System\bnkbdos3.spr
 r System\resbdos3.spr

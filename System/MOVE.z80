@@ -32,11 +32,13 @@ endif
 
 
 ?bank:
+	push af
 	push bc				; save register b for temp
 	call setbank
 	pop bc				; restore register b
-	ret
+	pop af
+ret
 
-				;	128 bytes at a time
+
 
 	end

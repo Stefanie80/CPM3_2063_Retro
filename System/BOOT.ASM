@@ -4,6 +4,7 @@ true equ -1
 false equ not true
 
 banked	equ true
+vdp		equ false
 debug 	equ false
 
 	public	?init,?ldccp,?rlccp,?time
@@ -11,7 +12,8 @@ debug 	equ false
 	extrn	@civec,@covec,@aivec,@aovec,@lovec
 	extrn 	@cbnk,?bnksl,dumpivars
 	;extrn 	spamon,spamoff
-	extrn 	iputs,dumpregs,ictc3,ictc0,usrfunc
+	extrn 	iputs,dumpregs,ictc3,usrfunc
+	extrn 	RIX,RIY
 
 	maclib ports
 	maclib z80
@@ -33,8 +35,10 @@ if debug
 	call iputs
 	db '?INIT ',0
 endif
-	lxi h,08000h ! shld @civec 
-	lxi h,08000h ! shld @covec	; assign console to CRT:
+	lhld RIY ! shld @civec 		; CIVEC from ROM Setup
+	;lxi h,08000h ! shld @civec 
+	lhld RIX ! shld @covec		; COVEC from ROM setup
+	;lxi h,09000h ! shld @covec	; assign console to CRT:
 	lxi h,02000h ! shld @lovec 					; assign printer to LPT:
 	lxi h,04000h ! shld @aivec ! shld @aovec	; assign AUX to CRT1:
 	;call ictc0
@@ -74,7 +78,8 @@ endif
 	
 	lxi b,0003h					; B=0=sys,C=3=save CCP
 	call usrfunc
-	
+
+if vdp	
 	lxi b,0001h					; B=0=sys,C=1=Init
 	lxi d,08000h				; window base=common memory
 	call usrfunc
@@ -94,8 +99,14 @@ endif
 	lxi b,0000h					; B=0=sys,C=0=RW block
 	lxi d,01E3h					; D=1=write, block number E3 (E0+E1 used for CCP, E2=ANSI font)
 	call usrfunc
+endif
 
 	pop psw ! call ?bnksl		; restore original bank
+if debug
+	call iputs
+	db '/LDCCP ',13,10,0
+endif	
+	
 	ret
 
 no$CCP:			; here if we couldn't find the file
@@ -113,7 +124,8 @@ no$CCP:			; here if we couldn't find the file
 
 	lxi b,0101h					; B=1=vdp,C=1=Init
 	call usrfunc
-	
+
+if vdp	
 	lxi b,0000h					; B=0=sys,C=0=RW block
 	lxi d,00E3h					; D=0=read, block number E3 (font with inverted upper chars)
 	call usrfunc
@@ -121,7 +133,7 @@ no$CCP:			; here if we couldn't find the file
 	lxi b,0102h					; B=1=vdp,C=2=load font
 	lxi h,08000h				; read from common memory
 	call usrfunc
-
+endif
 	ret
 
     ; No external clock.
@@ -144,13 +156,15 @@ read:
 
 opnmsg		db 	13,10,'BDOS OPEN: ',0
 
-signon$msg	db	13,10,'CP/M Plus for Z80 Retro!',13,10,10,0
+signon$msg	db	1Ah,13,10,'CP/M Plus for Z80 Retro!',13,10,10,0
 			
 ccp$msg		db	13,10,'BIOS Err on A: No CCP.COM file',0
 
 ccp$fcb		db	1,'CCP     ','COM',0,0,0,0
 		ds	16
 fcb$nr		db	0,0,0
+
+end
 
 ; init$table	db 0
 		; db 	0

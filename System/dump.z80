@@ -1,7 +1,7 @@
 ; Various dump routines
 ; to see whats going on
 
-DSEG
+CSEG
 
 	public disk_dump, dumpdpb, dumpdtbl, hexdmp
 	public hexdump_a, dumpdma, dump_regs, dumpivars
@@ -9,7 +9,7 @@ DSEG
 	public dumpregs
 dumpregs equ dump_regs
 
-	extrn ?co, iputs, puts_crlf
+	extrn satxch, iputs, puts_crlf
 	
 	extrn @civec, @covec, @aivec, @aovec, @lovec, @bnkbf
 	extrn @crdma, @crdsk, @vinfo, @resel, @fx, @usrcd
@@ -72,7 +72,7 @@ disk_dump:
     pop hl
     ret
 
-dumpdpb:		; dump the DBP pointed to by IX
+dumpdpb:		; dump the DPB pointed to by IX
 	call iputs
 	db	'DPB:',0
 	ld 	a,(@rdrv)
@@ -204,7 +204,7 @@ dumpdtbl:
 ; if E is zero, no fancy formatting
 ; Does not clobber any registers
 ;#############################################################################
-hexdmp:
+hexdmp: ;dump BC bytes from HL. If E!=0 be fancy
 	push	af
 	push	de
 	push	hl
@@ -222,10 +222,10 @@ hexdmp:
 	cp	008h			; put an extra space between positiioons 7 and 8
 	jr	nz,.hd_not8
 	ld	c,' '
-	call	?co
+	call	satxch
 .hd_not8:
 	ld	c,' '
-	call	?co
+	call	satxch
 	jp	.hexdump1
 
 .hexdump0n:
@@ -236,9 +236,9 @@ hexdmp:
 	ld	a,l
 	call	hexdump_a
 	ld	c,':'
-	call	?co
+	call	satxch
 	ld	c,' '
-	call	?co
+	call	satxch
 
 .hexdump1:
 	ld	a,(hl)
@@ -266,16 +266,16 @@ hexdmp:
 ; Clobbers C
 ;#############################################################################
 hexdump_a:
-	push	af
+	push af
 	srl	a
 	srl	a
 	srl	a
 	srl	a
-	call	.hexdump_nib
-	pop	af
-	push	af
+	call .hexdump_nib
+	pop af
+	push af
 	and	00fh
-	call	.hexdump_nib
+	call .hexdump_nib
 	pop	af
 	ret
 
@@ -286,15 +286,17 @@ hexdump_a:
 	add	'A'-'9'-1
 .hexdump_num:
 	ld	c,a
-	jp	?co	   ; tail
+	ld 	b,0
+	jp	satxch	   ; tail
 
 ;#############################################################################
 ; Print the values of BC, DE, HL
 ; Clobber nothing, save everything
-; Beware: Requires 10 Bytes of stack space! (incl. ret ptr)
+; Beware: Requires 20 Bytes of stack space! (incl. ret ptr, + subcalls)
 ;#############################################################################
 
 dump_regs:
+ret
 	push af
 	push bc
 	push de
