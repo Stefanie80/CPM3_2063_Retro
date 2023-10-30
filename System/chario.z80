@@ -1,0 +1,271 @@
+.debug 	equ 0
+cr		equ	0dh		; carriage return
+lf		equ	0ah		; line feed
+
+
+
+extrn @CDTBL,@MXTPA,@ctbl
+extrn iputs,hexdmp,hexdump_a
+public	?cinit,?ci,?co,?cist,?cost
+public devtbl,getdev
+
+reinit: db 0
+
+	public	@ctbl
+
+@ctbl:
+	db 	'SIO-A '	; device 0, 
+	db	0Fh
+	db 	14			; 14 -> 9600bps
+	db 	'SIO-B '	; device 1, 
+	db 	0Fh
+	db 	15			; 15 -> 19200bps (?)
+	db 	'PRN   '
+	db 	2			; 2 -> output only
+	db 	0			; 0 -> no baudrate
+	db 	0			; table terminator
+	ds 	103
+
+
+devtbl:
+	push bc
+	push de
+if .debug
+	call iputs
+	db '?DTBL',cr,lf,0
+endif
+	; Create a temporary table in RAM
+
+	; Determine number of devices
+	ld hl,@CDTBL
+	ld b,16
+	ld e,0
+count:
+	ld a,(hl)
+	inc hl
+	ld d,(hl)
+	inc hl
+	or d
+	jr z,countdone
+	inc e
+	djnz count
+countdone:
+	; E = number of devices
+	ld b,e
+	push bc		; save count for later
+if 0 ; .debug
+	ld a,e
+	call hexdump_a
+endif	
+	ld a,0
+	ld d,8
+addup:
+	add a,d
+	djnz addup
+	; Determine size of the table
+	scf 
+	ccf
+	; A = number of bytes for table
+	ld e,a
+	ld d,0
+	inc de			; add one byte for the terminating zero
+	inc de
+	; Determine location for the table
+	ld hl,(@MXTPA) 	; top of the TPA
+	sbc hl,de		; HL = table address
+	;ld (tmptbl),hl	; save that
+	; copy in the device blocks
+	pop bc			; restore device count
+	ld c,b			; get a static copy
+	ld de,@ctbl
+nextblock:
+	push bc			; save counter
+	push de 		; save destination
+	; make device number
+	ld a,c
+	sub b
+	ld b,a
+	call getdev		; get vector in IX&DE
+	ex de,hl		; source in HL
+	pop de			; restore destination
+	ld bc,8 		; 8 bytes
+	ldir			; copy 1 block
+	pop bc			; restore counter
+	djnz nextblock
+	xor a
+	ld (de),a		; terminating zero
+	inc de
+	ld (de),a		; terminating zero
+	; Set the Reinit flag
+	ld a,0FFh
+	ld (reinit),a
+	; return table address in HL
+	ld hl,@ctbl
+	; also return CDTBL in DE(?)
+	ld de,@CDTBL
+if .debug
+	push hl
+	push de
+	ld bc,80
+	ld e,0
+	call hexdmp	
+	call iputs
+	db '/DTBL',cr,lf,0
+	pop de
+	pop hl
+endif
+	pop de
+	pop bc
+ret
+
+?cinit:
+if .debug 
+	push bc
+	call iputs
+	db '?CINIT',cr,lf,0
+	pop bc
+endif
+	ld b,c
+	call getdev
+	ret z		; If zero, device doesn't exist
+	; device pointer now in IX&DE
+	; check for reinit flag
+	ld a,(reinit)
+	or a
+	jr z,notreinit
+	; if set, copy back from temp table
+	; our block is at (tmptbl)+(8*C)
+	ld b,c
+	ld hl,@ctbl
+	ld de,8
+iniloop:
+	add hl,de
+	djnz iniloop
+	push ix
+	pop de
+	ld bc,8
+	ldir
+	; then reset flag
+	xor a
+	ld (reinit),a
+notreinit:
+	call devinit
+if .debug 
+	push bc
+	call iputs
+	db '/CINIT',cr,lf,0
+	pop bc
+endif
+	
+ret
+
+?ci:
+if .debug >1
+	push bc
+	call iputs
+	db '?CI',cr,lf,0
+	pop bc
+endif
+	call getdev
+	ret z
+	call devinp
+ret
+
+?co:
+	push hl
+if .debug >1
+	push bc
+	call iputs
+	db '?CO',cr,lf,0
+	pop bc
+endif
+	call getdev
+	jr z,skip
+	call devoutp
+skip:
+	pop hl
+ret
+
+?cist:
+if .debug >1
+	push bc
+	call iputs
+	db '?CIST',cr,lf,0
+	pop bc
+endif
+	call getdev
+	jr z,noistat
+	call devinst
+ret
+noistat:
+	xor a
+ret
+
+?cost:
+if .debug >1
+	push bc
+	call iputs
+	db '?COST',cr,lf,0
+	pop bc
+endif
+	call getdev
+	jr z,noostat
+	call devoutst
+ret
+noostat:
+	ld a,0FFh
+ret
+
+getdev:
+	; get device number in B
+	; *Must* preserve C
+	ld a,b
+	add a,a
+	ld d,0
+	ld e,a
+	ld hl,@CDTBL
+	add hl,de
+	ld e,(hl)
+	inc hl
+	ld d,(hl)
+	; check for 0
+	ld a,d
+	or e	; If zero, set Z flag
+	push de
+	pop ix
+	; return vector in IX	
+ret
+
+devinst:
+	ld l,(ix-8)
+	ld h,(ix-7)
+	call callhl
+ret
+
+devoutst:
+	ld l,(ix-6)
+	ld h,(ix-5)
+	call callhl
+ret
+
+devinit:
+	ld l,(ix-10)
+	ld h,(ix-9)
+	call callhl
+ret
+
+devoutp:
+	ld l,(ix-2)
+	ld h,(ix-1)
+	call callhl
+ret
+
+devinp:
+	ld l,(ix-4)
+	ld h,(ix-3)
+	call callhl
+ret
+
+
+callhl:
+	jp (HL)

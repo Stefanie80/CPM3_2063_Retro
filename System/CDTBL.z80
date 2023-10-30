@@ -1,0 +1,9 @@
+; Character Device Table
+; Must be 16 words, padded with 0s
+
+	extrn SIOA, SIOB, PRN;, VDP
+	public @CDTBL
+	
+@CDTBL:	dw	SIOA, SIOB, PRN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+
+end

@@ -69,8 +69,8 @@ ccp	equ 0100h	; Console Command Processor gets loaded into the TPA
 	public ?pmsg,?pdec	; print message, print number from 0 to 65535
 	public ?pderr		; print BIOS disk error message header
 
-	extrn dumpivars,dumpregs,iputs,usrfunc
-	;extrn spamon,spamoff
+	extrn dumpivars,dumpregs,iputs,usrfunc,devtbl
+	extrn spamon,spamoff
 	maclib modebaud		; define mode bits
 
 
@@ -82,6 +82,8 @@ ccp	equ 0100h	; Console Command Processor gets loaded into the TPA
 	public ?conos,?auxis,?auxos,?dvtbl,?devin,?drtbl
 	public ?mltio,?flush,?mov,?tim,?bnksl,?stbnk,?xmov
 
+	
+	extrn storeregs
 
     ; BIOS Jump vector.
 
@@ -137,6 +139,7 @@ ccp	equ 0100h	; Console Command Processor gets loaded into the TPA
 	
 boot:
 	lxi sp,boot$stack
+	call storeregs
 	mvi c,15	; initialize all 16 character devices
 c$init$loop:
 	push b ! call ?cinit ! pop b
@@ -179,6 +182,7 @@ endif
 if debug
 	call iputs
 	db 'JMP '
+	call spamon
 endif
 	jmp ccp
 
@@ -217,8 +221,8 @@ boot$stack	equ $
 	; DEVTBL
 	;	Return address of character device table
 
-devtbl:
-	lxi h,@ctbl ! ret
+;devtbl:
+	;lxi h,@ctbl ! ret
 
 
 	; GETDRV
