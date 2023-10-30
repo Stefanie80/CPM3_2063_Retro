@@ -1,0 +1,8 @@
+r Other\fnt6x8.z80
+r System\VDP.z80
+
+zmac fnt6x8
+zmac VDP
+
+link vdp[OS]=VDP
+w system\vdp.spr b

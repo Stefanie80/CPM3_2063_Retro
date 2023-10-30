@@ -1,0 +1,925 @@
+; CP/M 3 Character Device driver
+; For TMS 9918 VDP
+
+.debug_vdp	equ 0
+multimode 	equ 0
+
+public VDP
+
+; extrn for debug only
+extrn iputs,hexdump_a
+
+; extrn for the actual driver
+extrn font_6x8 ;,font_8x8
+
+cr			equ	0dh		; carriage return
+lf			equ	0ah		; line feed
+vdp_vram	equ	080h	; VDP port for accessing the VRAM
+vdp_reg		equ	081h	; VDP port for accessing the registers
+
+vdp_cnt: 	db 5		; Delay Count.
+
+; Character Device Header
+;
+;  This block follows closely the structure for XDPHs in CP/M 3
+;  The 8 Bytes after the Label are as described in the CP/M 3 system guide
+;  Before the label are entry points to driver routines
+;  Non-existent functions can just RET
+;  The INIT function needs to evaluate the block after the label for changes
+;  The Input,Output and Status functions should behave as described in the CP/M 3 system guide
+; TODO:
+; 	- Find a way to handle console size for different terminals and screen modes
+;	- Handle Color
+
+	dw vdpini	; init routine
+	dw istat 	; input status
+	dw ostat	; output status
+	dw input	; input routine
+	dw vdp_out	; output routine
+VDP:
+	db 	'VDP   '	; 6 Bytes Device Name
+	db 	00000010b	; Mode Byte, 2 -> output only
+	;   |||||||+- Can Input
+	;   ||||||+-- Can Output
+	;   |||||+--- Can Softbaud
+	;   ||||+---- Can Xon/Xoff
+	;   |||+----- Xon/Xoff enable
+	db 	0			; 0 -> no baudrate
+	
+
+; General Info about the TMS 9918
+;
+;	Color Codes:
+; 0=Transparent
+; 1=Black
+; 2=Medium Green
+; 3=Light Green
+; 4=Dark blue
+; 5=Light blue
+; 6=Dark Red
+; 7=Cyan (Aqua Blue)
+; 8=Medium Red
+; 9=Light Red
+; A=Dark Yellow
+; B=Light Yellow
+; C=Dark Green
+; D=Magenta(Purple)
+; E=Gray
+; F=white
+; 
+; Write Only Registers:
+;
+; R0:	000000xx
+;		      |+- Ext.Vid.
+;  		      +-- M3 bit of VDP Mode
+;
+; R1: 	xxxxx0xx
+;		||||| |+- Sprite Magnify
+;		||||| +-- Sprite Size
+;		||||+----- M2 bit of VDP Mode
+;		|||+------ M1 bit of VDP Mode
+;		||+------- Interrupt Enable
+;		|+-------- Blank Display
+;		+--------- 4k/16k select
+;
+; R2: 	0000xxxx
+;			Name Table address in VRAM
+;
+; R3:	xxxxxxxx
+;			Color Table address in VRAM
+;
+; R4: 	00000xxx
+;			Pattern Table address in VRAM
+;
+; R5:	0xxxxxxx
+;			Sprite Attributes in VRAM
+;
+; R6: 	00000xxx
+;			Sprite Pattern Table in VRAM
+;
+; R7:	ffffbbbb
+;		||||++++- Background Color
+;		++++----- Foreground Text Color
+;
+; VDP Mode Bits:
+;		M1 M2 M3
+;		0  0  0		Graphics 1
+;		0  0  1 	Graphics 2
+;		0  1  0 	Multicolor
+;		1  0  0  	Text Mode
+; VRAM Adresses are 14 bit
+; The active bits in the registers are the highest bits of a 14 bit address
+;
+; Status Register:
+;
+;		xxxsssss
+;		|||+++++- Fifth Sprite number
+;		||+------ Coincidence Flag
+;		|+------- Fifth Sprite Flag
+;		+-------- Frame/Interrupt Flag
+
+
+; Console code from bios3.z80
+
+
+;###############################################
+; Functions with public entry points
+; All of these have to switch to local stack
+;###############################################
+
+istat:
+	xor a	; never ready
+ret
+
+ostat:
+	ld a,0FFh	; always ready
+ret
+
+input:
+	; just ret
+ret
+
+vdpini:
+	ld (sysstack),sp
+	ld sp,vdpstack
+
+if .debug_vdp
+	call iputs
+	db 	'Vini',cr,lf,0
+endif
+
+	; First, Disable the Display to avoid garbage
+	ld c,vdp_reg
+	ld a,10010000b	; Text Mode, Display off
+	out (c),a
+	ld a,081h		; R1
+	out (c),a
+	; Clear name Table
+	call clearvram
+	; Load font
+	call .vdp_ldfnt
+	; Initialize the VDP for Text Mode
+	ld	hl,.vdpinit
+	ld	b,.vdpinit_len
+	ld	c,vdp_reg
+	otir				; write the config bytes
+jp return
+
+;###############################################
+; Process Character
+;###############################################
+
+vdp_out:
+	ld (sysstack),sp
+	ld sp,vdpstack
+	
+if .debug_vdp
+	push bc
+	call iputs 
+	db 'Vout',cr,lf,0
+	pop bc
+endif
+
+	push bc
+	call vdp_curs	; remove the cursor
+	pop bc
+	ld a,(vdp_esc)	; check if a ESC sequence has been started
+	or a
+	jp nz,.term_cmd	; byte is part of ESC sequence, process separately
+	ld a,c
+		; check non-printable characters
+	cp a,01Bh		; ESC
+	jp z,vescape
+	cp a,00Ah		; linefeed
+	jp z,vlf
+	cp a,00Dh		; carriage return
+	jp z,vcr
+	cp a,008h		; Backspace
+	jp z,vbs
+	cp a,00Bh		; Upline
+	jp z,vul
+	cp a,00Ch		; Forespace
+	jp z,vfs
+	cp a,01Ah		; CLS
+	jp z,vcls
+	cp a,01Eh		; Home
+	jp z,vhome
+		; if we get here, we have a printable character
+	; push de
+	; push bc
+	; call fix_xy
+	; pop bc
+	; pop de
+	ld a,(vdp_x)
+	ld e,a
+	ld a,(vdp_y)
+	ld d,a
+	call vdp_char
+		; advance cursor position
+	ld hl,vdp_x
+	inc (hl)
+	call vdp_cursor
+jp return
+
+;###############################################
+; Functions called internally with JP
+;###############################################
+
+vcr:		; Return to start of line
+	call vdp_curs
+	xor a
+	ld (vdp_x),a
+jp return
+
+vlf:		; Advance one line
+	;call vdp_curs
+	ld a,(vdp_y)
+	cp vdp_lines-1
+	jr nz,.nextline
+	inc a
+	ld (vdp_y),a
+	call vscroll
+	jr .clearline
+.nextline:
+	ld a,(vdp_y)
+	inc a
+	ld (vdp_y),a
+.clearline:
+	; clear the line, too!
+	ld a,(vdp_y)
+	ld d,a		; D = Line number
+	xor a
+	ld e,a		; E = column = 0
+	ld a,' '
+	ld c,a		; C = space character
+	ld a, vdp_cols
+	ld b,a		; our loop counter
+.clr_chr:
+	push bc
+	push de
+	call vdp_char
+	pop de
+	pop bc
+	inc e
+	dec b
+	jr nz,.clr_chr
+	;pop af
+	;xor a
+	;ld (vdp_x),a
+jp return
+
+vbs:
+	ld a,(vdp_x)
+	dec a
+	ld (vdp_x),a
+jp return
+
+vul:
+	ld hl,vdp_y
+	dec (hl)
+jp return
+
+vfs:
+	ld hl,vdp_x
+	inc (hl)
+jp return
+
+;###############################################
+; Clear Screen / Home Cursor
+;###############################################
+
+vcls:
+	ld hl,0800h		; offset for VRAM
+	ld a,l
+	out (vdp_reg),a
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	ld b,vdp_cols
+	ld c,vdp_lines
+	ld a,' '
+.cls:	
+	out (vdp_vram),a	; Write to the VDP
+	call vdelay
+	djnz .cls
+	dec c
+	ld b,vdp_cols
+	jr nz,.cls
+	; fall through into Home
+vhome:
+if .debug_vdp
+	call iputs 
+	db 'Vhome',cr,lf,0
+endif
+
+	xor a
+	ld (vdp_x),a
+	ld (vdp_y),a
+jp return
+
+;###############################################
+; Common return point
+;###############################################
+return:
+if .debug_vdp
+	call iputs 
+	db 'Vret',cr,lf,0
+endif
+	ld sp,(sysstack)
+	ret
+
+;###############################################
+; Internal functions 
+;###############################################
+
+.vdp_ldfnt:
+	; Set the VRAM write address to 0
+	ld	a,0				; LSB
+	out	(vdp_reg),a
+	call vdelay
+	ld	a,040h			; MSB
+	out	(vdp_reg),a
+	ld	c,vdp_vram		; the I/O port number
+	ld	de,2048			; number of bytes to send
+	ld 	hl,font_6x8
+.ldfnt_loop:
+	call vdelay
+	outi				; note: this clobbers B
+	dec	de
+	ld	a,d
+	or	e
+	jp	nz,.ldfnt_loop
+ret
+
+clearvram:
+	ld hl,000h		; offset for VRAM
+	ld a,l
+	out (vdp_reg),a
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	
+	ld bc,16384		; 16k VRAM
+clrv:
+	xor a
+	out (vdp_vram),a	; Write to the VDP
+	call vdelay
+	dec bc
+	ld a,b
+	or c
+	jr nz,clrv
+ret
+
+;###############################################
+; Delay for writing to VDP
+; TODO: Set delay counter according to CPU Clock
+;###############################################
+
+vdelay:
+	push af
+	ld a,(vdp_cnt)
+.delloop:
+	dec a
+	jr nz,.delloop
+	pop af
+	ret
+
+
+;###############################################
+; Scroll the screen
+;###############################################
+
+
+vscroll:
+	ld b,vdp_lines-1	; counter
+	ld d,0 			; target line
+	ld e,1			; source line
+scr0:
+	ld c,e
+	call readline
+	ld c,d
+	call writeline
+	inc d
+	inc e
+	djnz scr0
+	
+	ld hl,vdp_y
+	dec (hl)
+ret	
+
+readline:
+	push bc
+	push de
+	push hl
+	
+	; Line number in C
+	ld d,c
+	ld e,0
+	call getaddr	; offset in HL
+	ld de,(ntbl_base)
+	add hl,de
+	
+	ld a,l
+	out (vdp_reg),a		; address LSB
+	call vdelay
+	ld a,h
+	out (vdp_reg),a		; VDP address loaded
+
+	ld de,.linebuf		; Buffer for one line
+	ld b,vdp_cols
+.rl0:
+	call vdelay
+	in a,(vdp_vram)	; read VRAM
+	ld (de),a			; store byte
+	inc de				; advance pointer
+	djnz .rl0
+	
+	pop hl
+	pop de
+	pop bc	
+ret
+
+writeline:
+	push bc
+	push de
+	push hl
+
+	; Line number in C
+	ld d,c
+	ld e,0
+	call getaddr
+	ld de,(ntbl_base)
+	add hl,de
+	
+	ld a,l
+	out (vdp_reg),a		; address LSB
+	call vdelay
+	ld a,040h
+	or h
+	out (vdp_reg),a		; VDP address loaded
+	
+	ld de,.linebuf		; Buffer for one line
+	ld b,vdp_cols
+.wl1:
+	call vdelay
+	ld a,(de)
+	out (vdp_vram),a
+	inc de
+	djnz .wl1
+	
+	pop hl
+	pop de
+	pop bc
+ret
+
+
+;###############################################
+; Print a character to VRAM
+;###############################################
+
+vdp_char:			; print char in C at coordinates in D:E
+if .debug_vdp
+	push de
+	push bc
+	call iputs 
+	db 'Vchr',cr,lf,0
+	pop bc
+	pop de
+endif
+	 
+	push bc			; save character
+	call getaddr	; HL= offset
+	
+	; Load VRAM address
+	ld de,(ntbl_base) ;0800h		, Name Table in VRAM
+	add hl,de
+	ld a,l
+	out (vdp_reg),a
+	call vdelay
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+
+	; Now write the character
+	pop bc
+	ld a,(vdp_rev)
+	or a
+	jr z,.notrev
+	ld a,c
+	or 080h
+.notrev:
+	ld a,c
+	call vdelay
+	out (vdp_vram),a	; Write to the VDP
+	ret
+
+getaddr:	; Translate screen coordinates into VRAM offset
+if .debug_vdp
+	push bc
+	push de
+	push hl
+	
+	push de
+	call iputs
+	db 'Vxlt ',0
+	pop de
+	ld a,d
+	call hexdump_a
+	ld a,e
+	call hexdump_a
+	
+	pop hl
+	pop de
+	pop bc
+endif
+	; D=Line, E=Column
+	; Determine the target offset
+	push bc
+	push de
+	;push hl
+	
+	ld h,0			; clear HL
+	ld l,e
+	ld c,d
+	xor a
+	or c
+	jr z,.noadd
+	ld d,0			; clear DE
+	ld e,vdp_cols
+	ld b,c
+.addloop0:
+	add hl,de
+	;dec c
+	;jp m,.noadd
+	djnz .addloop0
+	;jr nz,.addloop0
+.noadd:
+	; HL= offset
+	;pop hl
+	pop de
+	pop bc
+
+if .debug_vdp
+	push bc
+	push de
+	push hl
+	
+	push hl
+	call iputs
+	db '=',0
+	pop de
+	ld a,d
+	call hexdump_a
+	ld a,e
+	call hexdump_a
+	
+	pop hl
+	pop de
+	pop bc
+endif
+ret
+
+fix_xy:
+	ld a,(vdp_x)
+	sub vdp_cols
+	jp p, advln
+	ret
+advln:
+	xor a
+	ld (vdp_x),a
+	ld a,(vdp_y)
+	inc a
+	ld (vdp_y),a
+fixing:	
+	ld c,a
+	ld a,vdp_lines
+	sub c
+	jp p,xyfixed
+	call vscroll
+	ld a,(vdp_y)
+	jr fixing
+xyfixed:
+ret
+
+;###############################################
+; Start ESC sequence
+;###############################################
+
+vescape:
+	ld a,1
+	ld (vdp_esc),a
+jp return
+
+.term_fg:
+	xor a
+	ld (vdp_bg),a
+jp return
+
+.term_bg:
+	ld a,1
+	ld (vdp_bg),a
+jp return
+
+;###############################################
+; Process ESC sequence
+;###############################################
+
+.term_cmd:
+	ld a,(vdp_state)
+	or a
+	jr z,.state0
+	dec a
+	jr z,.term_atr
+	jr .term_xy
+.state0:
+	ld a,c
+	cp '='			; Load cursor position
+	jr z,.term_xy
+	cp 'G'			; Set Video Attributes
+	jr z,.term_atr
+	cp '('			; Set Foreground mode
+	jr z,.term_fg
+	cp ')'			; Set Background mode
+	jr z,.term_bg
+
+	;invalid control sequence
+	xor a
+	ld (vdp_state),a
+	ld (vdp_esc),a
+jp return
+
+;###############################################
+; Set Position
+;###############################################
+
+.term_xy:
+	ld a,(vdp_state)
+	or a
+	jr z,.xy_state0
+	dec a
+	jr z,.xy_end
+	dec a
+	jr z,.xy_row
+	dec a
+	jr z,.xy_col
+jp return
+.xy_row:
+	ld a,c
+	sub 32
+	ld (vdp_y),a
+	ld hl,vdp_state
+	inc (hl)
+jp return
+.xy_col:
+	ld a,c
+	sub 32
+	ld (vdp_x),a
+	jr .xy_end
+.xy_state0:
+	ld a,2
+	ld (vdp_state),a
+jp return
+.xy_end:
+	xor a
+	ld (vdp_state),a
+	ld (vdp_esc),a
+jp return
+
+;###############################################
+; Set Terminal Attributes
+;###############################################
+
+.term_atr:
+	ld a,(vdp_state)
+	or a
+	jr z,.atr_state0
+	dec a
+	jr nz,.atr_end
+	ld a,c
+	cp '0'
+	jr z,vmode_def
+	cp '4'
+	jr z,vmode_rev
+	cp 'P'
+	jr z,vmode_def
+	cp 'T'
+	jr z,vmode_rev
+	jr .atr_end
+.atr_state0:
+	ld a,1
+	ld (vdp_state),a
+jp return
+.atr_end:
+	xor a
+	ld (vdp_state),a
+	ld (vdp_esc),a
+jp return
+vmode_def:
+	xor a
+	ld (vdp_rev),a
+jp return
+vmode_rev:
+	ld a,1
+	ld (vdp_rev),a
+jp return
+
+;###############################################
+; Print Cursor
+;###############################################
+
+vdp_cursor:
+	ld a,(vdp_x)
+	or a
+	jr z,.curende
+	ld a,(vdp_x)
+	ld e,a
+	ld a,(vdp_y)
+	ld d,a
+	ld a,(cursor)
+	ld c,a
+	call vdp_char
+.curende:
+	ret
+
+;###############################################
+; Remove Cursor
+;###############################################
+
+vdp_curs:
+	ld a,(vdp_x)
+	or a
+	jr z,.curend
+	ld a,(vdp_x)
+	ld e,a
+	ld a,(vdp_y)
+	ld d,a
+	ld a,' '
+	ld c,a
+	call vdp_char
+.curend:
+	ret
+
+;###############################################
+; Make Cursor Blink
+;###############################################
+
+curs_tick:
+	ld hl,(c_tick)
+	inc hl
+	ld (c_tick),hl
+	ld a,(c_mode)
+	or a
+	jp nz,.cmode1
+	ld a,h
+	and 010h
+	jr z,.zer0
+	ld a,(curs1)
+	ld (cursor),a
+	call vdp_cursor
+	ret
+.zer0:
+	ld a,(curs0)
+	ld (cursor),a
+	call vdp_cursor
+	ret
+.cmode1:
+	;ld a,(vdp_x)
+	;or a
+	;jp z,.ende
+	ld a,h
+	and 080h
+	jp z,.ende
+	ld hl,0			; clear HL
+	ld (c_tick),hl
+	ld a,(vdp_x)
+	ld l,a
+	ld a,(vdp_y)
+	ld c,a
+	ld de,0			; clear DE
+	ld a,vdp_cols
+	ld e,a
+.addloop1:
+	add hl,de
+	dec c
+	jp m,.noadd1
+	jr nz,.addloop1
+.noadd1:
+	ld de,0800h		; offset for VRAM
+	add hl,de
+	ld a,l
+	out (vdp_reg),a
+	call vdelay
+	xor a
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	call vdelay
+	in a,(vdp_vram)
+	call vdelay
+	xor 080h
+	push af
+	ld a,l
+	out (vdp_reg),a
+	call vdelay
+	ld a,040h
+	or h
+	out (vdp_reg),a	; VDP address loaded
+	call vdelay
+	pop af
+	out (vdp_vram),a
+.ende:
+	ret
+
+;###############################################
+; Variables for VDP
+;###############################################
+
+vdp_lines		equ 24
+vdp_cols		equ 40
+ntbl_base:		dw 00800h
+vdp_x:			db 0
+vdp_y:			db 0
+vdp_esc:		db 0
+vdp_state:		db 0
+vdp_rev:		db 0
+vdp_bg:			db 0
+cursor:			db 0DBh ;'_'
+curs0:			db '_' ;0A0h for block
+curs1:			db ' '
+c_tick:			dw 0
+c_mode:			db 1
+.linebuf:		ds 40
+
+sysstack: 		dw 0
+				ds 128	; should be enough?
+vdpstack:		db 0	; maybe the db is not needed.
+
+; Init code & font from user.z80
+
+.vdpinit:
+			db	00000000b,080h	; R0 = Text mode, no EXT video
+			db	11010000b,081h	; R1 = 16K RAM, enable display, disable INT, 8x8 sprites, mag off
+			db	00000010b,082h	; R2 = name table = 0x0800
+			db	00000000b,084h	; R4 = pattern table = 0x0000
+.vdpcol:	db	11110101b,087h	; R7 = white on light blue
+.vdpinit_len: equ	$-.vdpinit	; number of bytes to write
+
+if multimode
+; Graphics 1
+mode_gra1:
+	db	00000000b, 080h	; R0 Graphics 1, no ext.
+	db	11000000b, 081h ; R1 16k, Disp. on, Int off,8x8 sprites, no magn.
+	db 	00000101b, 082h ; R2 Name Table 	0x1400
+	db 	10000000b, 083h ; R3 Color Table 	0x2000
+	db	00000001b, 084h ; R4 Pattern Table	0x0800
+	db	00100000b, 085h ; R5 Sprite Atr.	0x1000
+	db 	00000000b, 086h ; R6 Sprite Patt.	0x0000
+	db 	00000001b, 087h ; R7 Black Backdrop
+mode_gra1L: equ $-mode_gra1
+
+; Graphics 2
+mode_gra2:
+	db	00000010b, 080h	; R0 Graphics 2, no ext.
+	db	11000010b, 081h ; R1 16k, Disp. on, Int off,16x16 sprites, no magn.
+	db 	00001110b, 082h ; R2 Name Table 	0x3800
+	db 	11111111b, 083h ; R3 Color Table 	0x2000
+	db	00000011b, 084h ; R4 Pattern Table	0x0000
+	db	01110110b, 085h ; R5 Sprite Atr.	0x3B00
+	db 	00000011b, 086h ; R6 Sprite Patt.	0x1800
+	db 	00001111b, 087h ; R7 White Backdrop
+mode_gra2L: equ $-mode_gra2
+
+; Multicolor
+mode_multi:
+	db 	000h, 080h
+	db 	0CBh, 081h
+	db 	005h, 082h
+	db 	001h, 084h
+	db	020h, 085h
+	db 	000h, 086h
+	db 	001h, 087h
+mode_multiL: equ $-mode_multi	
+
+; Text
+mode_text:
+	db	00000000b,080h	; R0 = Text mode, no EXT video
+	db	11010000b,081h	; R1 = 16K RAM, enable display, disable INT, 8x8 sprites, mag off
+	db	00000010b,082h	; R2 = name table = 0x0800
+	db	00000000b,084h	; R4 = pattern table = 0x0000
+	db	11110101b,087h	; R7 = white on light blue
+mode_textL: equ $-mode_text
+
+; New Mode
+mode_new:
+	db	00000010b, 080h	; R0 Graphics 2, no ext.
+	db	11000010b, 081h ; R1 16k, Disp. on, Int off,16x16 sprites, no magn.
+	db 	00001110b, 082h ; R2 Name Table 	0x3800
+	db 	10011111b, 083h ; R3 Color Table 	0x2000 - 0x2800
+	db	00000000b, 084h ; R4 Pattern Table	0x0000 - 0x0800
+	db	01110110b, 085h ; R5 Sprite Atr.	0x3B00
+	db 	00000011b, 086h ; R6 Sprite Patt.	0x1800
+	db 	00001111b, 087h ; R7 White Backdrop
+mode_newL: equ $-mode_new
+endif
+
+
+end
