@@ -1,4 +1,7 @@
-# CPM3_2063_Retro
+# CPM3_2063_Retro    
+### I will not be able to access this repo after February 7, 2024   
+### There will be no updates after that day   
+
 The CP/M 3 operating system, ported to John Winans' Z80 Retro board
 
 Check out John's project at https://github.com/Z80-Retro
